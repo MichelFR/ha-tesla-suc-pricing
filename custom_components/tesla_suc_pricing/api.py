@@ -138,7 +138,7 @@ class TeslaSuperchargerApi:
         # Check cache
         if country in cache_data and "timestamp" in cache_data[country] and "locations" in cache_data[country]:
             if current_time - cache_data[country]["timestamp"] < CACHE_TTL_LOCATIONS:
-                _LOGGER.debug("Using cached locations map for %s", country)
+                _LOGGER.debug("Using cached locations map for %s (%d entries)", country, len(cache_data[country]["locations"]))
                 locations = cache_data[country]["locations"]
         
         # Fetch if Cache miss
@@ -147,28 +147,32 @@ class TeslaSuperchargerApi:
             url = f"{LOCATIONS_URL}?country={country}&view=map"
             
             try:
-                _LOGGER.debug("Fetching locations map from APIs: %s", url)
+                _LOGGER.debug("Fetching locations map from API: %s", url)
                 async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as response:
                     response.raise_for_status()
                     data = await response.json()
                     
-                    if "data" in data and "data" in data["data"]:
-                        # Extract superchargers
-                        for loc in data["data"]["data"]:
-                            is_suc = "supercharger" in loc.get("location_type", [])
-                            has_func = "supercharger_function" in loc
-                            
-                            # Some superchargers are listed as "party" but have supercharger_function
-                            if (is_suc or has_func) and "location_url_slug" in loc:
-                                locations.append(loc)
-                                
-                        # Save to cache
-                        cache_data[country] = {
-                            "timestamp": current_time,
-                            "locations": locations
-                        }
-                        if self._store_locations:
-                            await self._store_locations.async_save(cache_data)
+                    raw_list = data.get("data", {}).get("data", [])
+                    _LOGGER.info("Tesla API returned %d total locations for country=%s", len(raw_list), country)
+                    
+                    # Extract superchargers: match by type OR presence of supercharger_function block
+                    for loc in raw_list:
+                        is_suc = "supercharger" in loc.get("location_type", [])
+                        has_func = "supercharger_function" in loc
+                        has_slug = "location_url_slug" in loc
+
+                        if (is_suc or has_func) and has_slug:
+                            locations.append(loc)
+                    
+                    _LOGGER.info("Filtered to %d supercharger locations for country=%s", len(locations), country)
+                    
+                    # Save to cache (even if empty, so we don't hammer the API)
+                    cache_data[country] = {
+                        "timestamp": current_time,
+                        "locations": locations
+                    }
+                    if self._store_locations:
+                        await self._store_locations.async_save(cache_data)
             except aiohttp.ClientResponseError as err:
                 if err.status == 403:
                     raise TeslaSuperchargerApiAuthError(
