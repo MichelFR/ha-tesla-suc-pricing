@@ -142,8 +142,12 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     
                 self._locations = locations
                 
-            except TeslaSuperchargerApiError:
+            except TeslaSuperchargerApiRateLimitError:
+                errors["base"] = "rate_limit"
+            except TeslaSuperchargerApiConnectionError:
                 errors["base"] = "cannot_connect"
+            except TeslaSuperchargerApiError:
+                errors["base"] = "invalid_location"
             except Exception as e:
                 _LOGGER.error("Failed to fetch superchargers: %s", e)
                 errors["base"] = "unknown"

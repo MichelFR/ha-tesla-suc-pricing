@@ -165,6 +165,22 @@ class TeslaSuperchargerApi:
                         }
                         if self._store_locations:
                             await self._store_locations.async_save(cache_data)
+            except aiohttp.ClientResponseError as err:
+                if err.status == 403:
+                    raise TeslaSuperchargerApiAuthError(
+                        f"Access forbidden (403) for {country} locations. Tesla may have bot protection active."
+                    ) from err
+                if err.status == 429:
+                    raise TeslaSuperchargerApiRateLimitError(
+                        f"Rate limited (429) for {country} locations. Too many requests from this IP."
+                    ) from err
+                raise TeslaSuperchargerApiConnectionError(
+                    f"HTTP error {err.status} fetching {country} locations: {err.message}"
+                ) from err
+            except aiohttp.ClientError as err:
+                raise TeslaSuperchargerApiConnectionError(
+                    f"Connection error fetching {country} locations: {err}"
+                ) from err
             except Exception as err:
                 _LOGGER.error("Failed to fetch superchargers map: %s", err)
                 raise TeslaSuperchargerApiError(f"Failed to fetch locations for {country}") from err
