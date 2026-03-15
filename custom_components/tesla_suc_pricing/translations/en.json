@@ -1,0 +1,51 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Tesla Supercharger",
+        "description": "Select a Supercharger location or enter a custom location slug. Data is fetched automatically from Tesla's API. Sensors will automatically update when prices change based on time-of-use schedules.",
+        "data": {
+          "location_slug": "Supercharger Location"
+        }
+      },
+      "custom": {
+        "title": "Add Custom Location",
+        "description": "Enter the location slug from Tesla's website URL (e.g., 'vaterstettensupercharger'). The integration will automatically fetch pricing data from Tesla's API.",
+        "data": {
+          "location_slug": "Location Slug (from Tesla URL)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to read location data file. Please check the JSON file exists and is valid.",
+      "invalid_location": "Invalid location data in JSON file. Please verify the file format.",
+      "invalid_json": "Invalid JSON data. Please verify you copied the complete JSON response from Tesla's website.",
+      "no_locations": "No location JSON files found. Please create JSON files in the data directory with Tesla API response data.",
+      "unknown": "Unexpected error occurred. Please check logs."
+    },
+    "abort": {
+      "already_configured": "This Supercharger location is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "member_price": {
+        "name": "Member Price"
+      },
+      "public_price": {
+        "name": "Public Charging Price"
+      },
+      "last_update": {
+        "name": "Last Update"
+      },
+      "congestion": {
+        "name": "Congestion"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Refresh"
+      }
+    }
+  }
+}

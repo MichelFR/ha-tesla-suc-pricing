@@ -1,0 +1,12 @@
+{
+  "domain": "tesla_suc_pricing",
+  "name": "Tesla Supercharger Pricing",
+  "codeowners": ["@custom"],
+  "config_flow": true,
+  "documentation": "https://github.com/custom/tesla_suc_pricing",
+  "integration_type": "device",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/custom/tesla_suc_pricing/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
