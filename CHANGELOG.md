@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2024-03-16
+
+### Fixed
+- Improved Supercharger discovery logic to include sites marked with `"party"` location type (but containing supercharger data), ensuring all nearby stations are found.
+- Fixed distance sorting to handle sites that might have missing root coordinates by falling back to `actual_latitude`/`actual_longitude` values.
+- Resolved a cache mutation bug where distance calculations were incorrectly polluting the shared API cache.
+
 ## [1.2.0] - 2024-03-15
 
 ### Added

@@ -153,9 +153,13 @@ class TeslaSuperchargerApi:
                     data = await response.json()
                     
                     if "data" in data and "data" in data["data"]:
-                        # Extract only "supercharger" variants
+                        # Extract superchargers
                         for loc in data["data"]["data"]:
-                            if "supercharger" in loc.get("location_type", []) and "location_url_slug" in loc:
+                            is_suc = "supercharger" in loc.get("location_type", [])
+                            has_func = "supercharger_function" in loc
+                            
+                            # Some superchargers are listed as "party" but have supercharger_function
+                            if (is_suc or has_func) and "location_url_slug" in loc:
                                 locations.append(loc)
                                 
                         # Save to cache
@@ -185,16 +189,37 @@ class TeslaSuperchargerApi:
                 _LOGGER.error("Failed to fetch superchargers map: %s", err)
                 raise TeslaSuperchargerApiError(f"Failed to fetch locations for {country}") from err
                 
-        # Calculate distances
+        # Calculate distances on a separate list of simple dicts/copies to avoid mutating cache
+        results = []
         for loc in locations:
-            loc_lat = float(loc.get("latitude", 0))
-            loc_lon = float(loc.get("longitude", 0))
-            # Distance returns meters, convert to km
-            loc["distance_km"] = distance(lat, lon, loc_lat, loc_lon) / 1000.0
+            try:
+                # Root level latitude/longitude are preferred if they exist
+                # Otherwise fallback to supercharger_function values
+                loc_lat = loc.get("latitude")
+                loc_lon = loc.get("longitude")
+                
+                if loc_lat is None or loc_lon is None:
+                    func = loc.get("supercharger_function", {})
+                    loc_lat = func.get("actual_latitude")
+                    loc_lon = func.get("actual_longitude")
+                
+                if loc_lat is None or loc_lon is None:
+                    continue
+                    
+                dist_km = distance(lat, lon, float(loc_lat), float(loc_lon)) / 1000.0
+                
+                results.append({
+                    "location_url_slug": loc["location_url_slug"],
+                    "latitude": float(loc_lat),
+                    "longitude": float(loc_lon),
+                    "distance_km": dist_km
+                })
+            except (ValueError, TypeError):
+                continue
             
-        # Sort by closest and take max_results
-        locations.sort(key=lambda x: x["distance_km"])
-        return locations[:max_results]
+        # Sort results by distance and return top X
+        results.sort(key=lambda x: x["distance_km"])
+        return results[:max_results]
 
     async def async_get_location_data(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> dict[str, Any]:
         """Get location details for pricing from Tesla API (NO CACHING for prices)."""
