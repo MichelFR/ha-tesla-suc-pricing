@@ -17,10 +17,11 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to read location data file. Please check the JSON file exists and is valid.",
-      "invalid_location": "Invalid location data in JSON file. Please verify the file format.",
-      "invalid_json": "Invalid JSON data. Please verify you copied the complete JSON response from Tesla's website.",
-      "no_locations": "No location JSON files found. Please create JSON files in the data directory with Tesla API response data.",
+      "cannot_connect": "Failed to connect to Tesla API. The API might be down or unreachable.",
+      "invalid_location": "Invalid location slug. Tesla API returned an error or no data for this location.",
+      "rate_limit": "Too Many Requests (429). Tesla has temporarily rate-limited your IP. Please try again later.",
+      "invalid_json": "Invalid JSON data received from Tesla API.",
+      "no_locations": "No valid supercharger locations found.",
       "unknown": "Unexpected error occurred. Please check logs."
     },
     "abort": {

@@ -35,6 +35,10 @@ class TeslaSuperchargerApiAuthError(TeslaSuperchargerApiError):
     """Exception for authentication errors."""
 
 
+class TeslaSuperchargerApiRateLimitError(TeslaSuperchargerApiError):
+    """Exception for rate limits (429)."""
+
+
 class TeslaSuperchargerApi:
     """API client for Tesla Supercharger pricing data - Fetches from Tesla API."""
 
@@ -165,6 +169,10 @@ class TeslaSuperchargerApi:
             if err.status == 403:
                 raise TeslaSuperchargerApiAuthError(
                     f"Access forbidden (403) for {location_slug}. Tesla may have bot protection active."
+                ) from err
+            if err.status == 429:
+                raise TeslaSuperchargerApiRateLimitError(
+                    f"Rate limited (429) for {location_slug}. Too many requests from this IP."
                 ) from err
             raise TeslaSuperchargerApiConnectionError(
                 f"HTTP error {err.status} fetching {location_slug}: {err.message}"

@@ -16,6 +16,7 @@ from .api import (
     TeslaSuperchargerApi,
     TeslaSuperchargerApiConnectionError,
     TeslaSuperchargerApiError,
+    TeslaSuperchargerApiRateLimitError,
 )
 from .const import (
     CONF_LOCALE,
@@ -95,6 +96,8 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_NAME: info["title"],
                     },
                 )
+            except TeslaSuperchargerApiRateLimitError:
+                errors["base"] = "rate_limit"
             except TeslaSuperchargerApiConnectionError:
                 errors["base"] = "cannot_connect"
             except TeslaSuperchargerApiError:
