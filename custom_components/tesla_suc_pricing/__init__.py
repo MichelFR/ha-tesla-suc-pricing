@@ -131,6 +131,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaSucPricingConfigEnt
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Register cache refresh service
+    async def handle_refresh_cache(call):
+        """Handle the service call to clear the API cache."""
+        api_instance = hass.data[DOMAIN].get("api")
+        if api_instance:
+            await api_instance.async_clear_cache()
+            
+    if not hass.services.has_service(DOMAIN, "refresh_cache"):
+        hass.services.async_register(DOMAIN, "refresh_cache", handle_refresh_cache)
+
     return True
 
 

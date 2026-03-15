@@ -11,6 +11,12 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
+import voluptuous as vol
+
+from homeassistant import config_entries
+from homeassistant.const import CONF_NAME, CONF_LATITUDE, CONF_LONGITUDE
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import FlowResult
 
 from .api import (
     TeslaSuperchargerApi,
@@ -22,36 +28,17 @@ from .const import (
     CONF_LOCALE,
     CONF_LOCATION_SLUG,
     CONF_SCAN_INTERVAL,
+    CONF_RADIUS_AMOUNT,
+    CONF_COUNTRY,
     DEFAULT_LOCALE,
-    DEFAULT_LOCATIONS,
+    DEFAULT_COUNTRY,
+    DEFAULT_RADIUS_AMOUNT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SCAN_INTERVAL_OPTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
-    api = TeslaSuperchargerApi(hass)
-
-    try:
-        # Test reading the location file to ensure slug is valid/accessible
-        result = await api.async_get_location_data(data[CONF_LOCATION_SLUG])
-        
-        location_slug = data[CONF_LOCATION_SLUG]
-        
-        # Get the real display name dynamically
-        title = await api.async_get_location_name(location_slug)
-
-        return {
-            "title": title,
-            "location_slug": location_slug,
-        }
-    finally:
-        # Always close the session after validation
-        await api.async_close()
 
 
 class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -63,76 +50,32 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self._custom_slug: str | None = None
         self._custom_name: str | None = None
+        self._locations = []
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step - Gathering Coordinates."""
         errors: dict[str, str] = {}
-        
-        # Load default locations from constants
-        api = TeslaSuperchargerApi(self.hass)
-        
-        # Initialize dictionary to store dynamically fetched names
-        if not hasattr(self, "_available_locations"):
-            self._available_locations = {}
-            for slug in DEFAULT_LOCATIONS:
-                try:
-                    name = await api.async_get_location_name(slug)
-                    self._available_locations[slug] = name
-                except Exception as e:
-                    _LOGGER.warning("Could not fetch name for %s: %s", slug, e)
-                    self._available_locations[slug] = slug
-                    
-        available_locations = self._available_locations
-        _LOGGER.info("Loaded %d location(s): %s", len(available_locations), list(available_locations.keys()))
 
         if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-                
-                # Set unique ID based on location slug
-                location_slug = user_input[CONF_LOCATION_SLUG]
-                await self.async_set_unique_id(location_slug)
-                self._abort_if_unique_id_configured()
-                
-                # If they manually typed it, present confirmation step
-                if location_slug not in available_locations:
-                    self._custom_slug = location_slug
-                    self._custom_name = info["title"]
-                    return await self.async_step_confirm()
-                
-                return self.async_create_entry(
-                    title=info["title"],
-                    data={
-                        CONF_LOCATION_SLUG: location_slug,
-                        CONF_NAME: info["title"],
-                    },
-                )
-            except TeslaSuperchargerApiRateLimitError:
-                errors["base"] = "rate_limit"
-            except TeslaSuperchargerApiConnectionError:
-                errors["base"] = "cannot_connect"
-            except TeslaSuperchargerApiError:
-                errors["base"] = "invalid_location"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+            self.lat = user_input[CONF_LATITUDE]
+            self.lon = user_input[CONF_LONGITUDE]
+            self.country = user_input[CONF_COUNTRY]
+            self.amount = user_input[CONF_RADIUS_AMOUNT]
+            return await self.async_step_select()
 
-        # Build select options and create selector
-        options = [
-            selector.SelectOptionDict(value=slug, label=name)
-            for slug, name in available_locations.items()
-        ]
+        # Defaults based on HA config
+        default_lat = self.hass.config.latitude
+        default_lon = self.hass.config.longitude
 
         data_schema = vol.Schema(
             {
-                vol.Required(CONF_LOCATION_SLUG): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=options,
-                        custom_value=True,
-                        mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
+                vol.Required(CONF_LATITUDE, default=default_lat): vol.Coerce(float),
+                vol.Required(CONF_LONGITUDE, default=default_lon): vol.Coerce(float),
+                vol.Required(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
+                vol.Required(CONF_RADIUS_AMOUNT, default=DEFAULT_RADIUS_AMOUNT): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=10)
                 ),
             }
         )
@@ -143,22 +86,103 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_confirm(
+    async def async_step_select(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Confirm the custom location."""
+        """Handle the selection step."""
+        errors: dict[str, str] = {}
+        api = TeslaSuperchargerApi(self.hass)
+
         if user_input is not None:
-            return self.async_create_entry(
-                title=self._custom_name,
-                data={
-                    CONF_LOCATION_SLUG: self._custom_slug,
-                    CONF_NAME: self._custom_name,
-                },
+            try:
+                location_slug = user_input[CONF_LOCATION_SLUG]
+                
+                # Verify we have the selected slug
+                selected_loc = next((loc for loc in self._locations if loc["slug"] == location_slug), None)
+                title = selected_loc["name"] if selected_loc else user_input.get(CONF_LOCATION_SLUG)
+
+                await self.async_set_unique_id(location_slug)
+                self._abort_if_unique_id_configured()
+
+                return self.async_create_entry(
+                    title=title,
+                    data={
+                        CONF_LOCATION_SLUG: location_slug,
+                        CONF_NAME: title,
+                    },
+                )
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception in select step")
+                errors["base"] = "unknown"
+            finally:
+                await api.async_close()
+        
+        # Load closest superchargers
+        if not self._locations:
+            try:
+                # 1. Fetch Closest
+                closest = await api.async_get_closest_superchargers(
+                    self.lat, self.lon, self.country, self.amount
+                )
+                
+                # 2. Fetch Marketing Names dynamically
+                locations = []
+                for loc in closest:
+                    slug = loc.get("location_url_slug")
+                    if not slug:
+                        continue
+                    name = await api.async_get_location_name(slug)
+                    
+                    dist_km = round(loc.get("distance_km", 0), 1)
+                    locations.append({
+                        "slug": slug,
+                        "name": f"{name} ({dist_km} km)",
+                        "distance_km": dist_km
+                    })
+                    
+                self._locations = locations
+                
+            except TeslaSuperchargerApiError:
+                errors["base"] = "cannot_connect"
+            except Exception as e:
+                _LOGGER.error("Failed to fetch superchargers: %s", e)
+                errors["base"] = "unknown"
+            finally:
+                await api.async_close()
+
+        if not self._locations and not errors:
+            errors["base"] = "no_locations"
+
+        # Build dropdown options
+        options = [
+            selector.SelectOptionDict(value=loc["slug"], label=loc["name"])
+            for loc in self._locations
+        ]
+
+        # Add fallback empty schema if errors/no locations found
+        if not options:
+            return self.async_show_form(
+                step_id="select",
+                data_schema=vol.Schema({}),
+                errors=errors,
             )
 
+        data_schema = vol.Schema(
+            {
+                vol.Required(CONF_LOCATION_SLUG): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=options,
+                        custom_value=False,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+            }
+        )
+
         return self.async_show_form(
-            step_id="confirm",
-            description_placeholders={"name": self._custom_name},
+            step_id="select",
+            data_schema=data_schema,
+            errors=errors,
         )
 
 

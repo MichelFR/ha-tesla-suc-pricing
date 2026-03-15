@@ -5,21 +5,32 @@ import asyncio
 import json
 import logging
 import ssl
+import time
 from pathlib import Path
 from typing import Any
 
 import aiohttp
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
+from homeassistant.util.location import distance
 
 from .const import (
+    DOMAIN,
     FEE_TYPE_CHARGING,
     VEHICLE_TYPE_TESLA,
     VEHICLE_TYPE_NON_TESLA,
+    STORAGE_KEY_LOCATIONS,
+    STORAGE_KEY_DETAILS,
+    STORAGE_VERSION,
+    CACHE_TTL_LOCATIONS,
+    CACHE_TTL_DETAILS,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 BASE_URL = "https://www.tesla.com/api/findus/get-charger-details"
+LOCATIONS_URL = "https://www.tesla.com/api/findus/get-locations"
+DETAILS_URL = "https://www.tesla.com/api/findus/get-location-details"
 DEFAULT_LOCALE = "de-DE"
 
 
@@ -48,6 +59,13 @@ class TeslaSuperchargerApi:
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
         self._ref_count = 0
+        
+        self._store_locations: Store | None = None
+        self._store_details: Store | None = None
+        
+        if hass:
+            self._store_locations = Store(hass, STORAGE_VERSION, STORAGE_KEY_LOCATIONS)
+            self._store_details = Store(hass, STORAGE_VERSION, STORAGE_KEY_DETAILS)
 
     def add_reference(self) -> None:
         """Increment reference count for shared session."""
@@ -66,11 +84,10 @@ class TeslaSuperchargerApi:
                 _LOGGER.debug("TeslaSuperchargerApi session closed.")
             self._ref_count = 0
 
-    async def async_get_location_data(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> dict[str, Any]:
-        """Get location details from Tesla API."""
+    async def _ensure_session(self) -> None:
+        """Ensure the aiohttp session is initialized and valid."""
         async with self._session_lock:
             if not self._session:
-                # Create session with minimal working headers from curl request
                 headers = {
                     "Accept": "application/json, text/plain, */*",
                     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -86,26 +103,86 @@ class TeslaSuperchargerApi:
                     "Sec-Fetch-Site": "same-origin",
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
                 }
-                # Configure SSL context to use TLS 1.2
                 ssl_context = ssl.create_default_context()
                 ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
                 ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
                 
-                # Start with accepted cookie consent
                 cookie_jar = aiohttp.CookieJar()
                 connector = aiohttp.TCPConnector(ssl=ssl_context)
                 self._session = aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar, connector=connector)
                 
-                # First, visit the Tesla homepage to get session cookies
                 _LOGGER.debug("Visiting Tesla homepage to establish session")
                 try:
                     async with self._session.get("https://www.tesla.com/de_de/", timeout=aiohttp.ClientTimeout(total=30)) as init_response:
-                        _LOGGER.debug("Initial homepage status: %s", init_response.status)
-                        # Read response to ensure connection is complete
                         await init_response.text()
-                        _LOGGER.debug("Session cookies obtained: %s", [f"{c.key}={c.value}" for c in self._session.cookie_jar])
                 except Exception as err:
                     _LOGGER.warning("Failed to initialize session from homepage: %s", err)
+
+    async def async_clear_cache(self) -> None:
+        """Clear the cached location maps."""
+        if self._store_locations:
+            await self._store_locations.async_save({})
+        if self._store_details:
+            await self._store_details.async_save({})
+        _LOGGER.info("Tesla Supercharger cache manually cleared.")
+
+    async def async_get_closest_superchargers(self, lat: float, lon: float, country: str, max_results: int = 5) -> list[dict[str, Any]]:
+        """Fetch closest superchargers by coordinates, utilizing 14-day cache."""
+        cache_data = {}
+        if self._store_locations:
+            cache_data = await self._store_locations.async_load() or {}
+            
+        current_time = time.time()
+        locations = []
+        
+        # Check cache
+        if country in cache_data and "timestamp" in cache_data[country] and "locations" in cache_data[country]:
+            if current_time - cache_data[country]["timestamp"] < CACHE_TTL_LOCATIONS:
+                _LOGGER.debug("Using cached locations map for %s", country)
+                locations = cache_data[country]["locations"]
+        
+        # Fetch if Cache miss
+        if not locations:
+            await self._ensure_session()
+            url = f"{LOCATIONS_URL}?country={country}&view=map"
+            
+            try:
+                _LOGGER.debug("Fetching locations map from APIs: %s", url)
+                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as response:
+                    response.raise_for_status()
+                    data = await response.json()
+                    
+                    if "data" in data and "data" in data["data"]:
+                        # Extract only "supercharger" variants
+                        for loc in data["data"]["data"]:
+                            if "supercharger" in loc.get("location_type", []) and "location_url_slug" in loc:
+                                locations.append(loc)
+                                
+                        # Save to cache
+                        cache_data[country] = {
+                            "timestamp": current_time,
+                            "locations": locations
+                        }
+                        if self._store_locations:
+                            await self._store_locations.async_save(cache_data)
+            except Exception as err:
+                _LOGGER.error("Failed to fetch superchargers map: %s", err)
+                raise TeslaSuperchargerApiError(f"Failed to fetch locations for {country}") from err
+                
+        # Calculate distances
+        for loc in locations:
+            loc_lat = float(loc.get("latitude", 0))
+            loc_lon = float(loc.get("longitude", 0))
+            # Distance returns meters, convert to km
+            loc["distance_km"] = distance(lat, lon, loc_lat, loc_lon) / 1000.0
+            
+        # Sort by closest and take max_results
+        locations.sort(key=lambda x: x["distance_km"])
+        return locations[:max_results]
+
+    async def async_get_location_data(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> dict[str, Any]:
+        """Get location details for pricing from Tesla API (NO CACHING for prices)."""
+        await self._ensure_session()
         
         # Build URL with query parameters directly
         url = f"{BASE_URL}?locationSlug={location_slug}&programType=supercharger&locale={locale}&isInHkMoTw=false"
@@ -158,24 +235,26 @@ class TeslaSuperchargerApi:
             ) from err
 
     async def async_get_location_name(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> str:
-        """Fetch the display name for a location slug dynamically."""
-        async with self._session_lock:
-            if not self._session:
-                headers = {
-                    "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
-                }
-                ssl_context = ssl.create_default_context()
-                ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-                cookie_jar = aiohttp.CookieJar()
-                connector = aiohttp.TCPConnector(ssl=ssl_context)
-                self._session = aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar, connector=connector)
+        """Fetch the display name for a location slug dynamically (with 1 day cache)."""
+        cache_data = {}
+        if self._store_details:
+            cache_data = await self._store_details.async_load() or {}
+            
+        current_time = time.time()
+        
+        # Check cache
+        if location_slug in cache_data and "timestamp" in cache_data[location_slug] and "name" in cache_data[location_slug]:
+            if current_time - cache_data[location_slug]["timestamp"] < CACHE_TTL_DETAILS:
+                return cache_data[location_slug]["name"]
+
+        await self._ensure_session()
 
         # Replace hyphens with underscores in locale to match user example (de_DE vs de-DE)
         api_locale = locale.replace("-", "_")
-        url = f"https://www.tesla.com/api/findus/get-location-details?locationSlug={location_slug}&functionTypes=party&locale={api_locale}&isInHkMoTw=false"
+        url = f"{DETAILS_URL}?locationSlug={location_slug}&functionTypes=party&locale={api_locale}&isInHkMoTw=false"
 
+        name = location_slug.replace("-", " ").replace("supercharger", "").title().strip()
+        
         try:
             _LOGGER.debug("Fetching location details for name: %s", url)
             async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
@@ -184,18 +263,24 @@ class TeslaSuperchargerApi:
                 
                 marketing = data.get("data", {}).get("marketing", {})
                 if marketing and "display_name" in marketing:
-                    return marketing["display_name"]
-                
-                functions = data.get("data", {}).get("functions", [])
-                if functions and len(functions) > 0 and "customer_facing_name" in functions[0]:
-                    return functions[0]["customer_facing_name"]
-                
-                # Fallback to slug titleized
-                return location_slug.replace("-", " ").replace("supercharger", "").title().strip()
+                    name = marketing["display_name"]
+                else:
+                    functions = data.get("data", {}).get("functions", [])
+                    if functions and len(functions) > 0 and "customer_facing_name" in functions[0]:
+                        name = functions[0]["customer_facing_name"]
                 
         except Exception as err:
             _LOGGER.warning("Could not fetch explicit location name for %s: %s", location_slug, err)
-            return location_slug.replace("-", " ").replace("supercharger", "").title().strip()
+            
+        # Save to cache regardless of whether it was perfectly fetched or falling back to slug
+        cache_data[location_slug] = {
+            "timestamp": current_time,
+            "name": name
+        }
+        if self._store_details:
+            await self._store_details.async_save(cache_data)
+            
+        return name
 
     @staticmethod
     def extract_pricing_data(api_response: dict[str, Any]) -> dict[str, Any]:

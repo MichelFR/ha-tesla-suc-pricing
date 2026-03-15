@@ -2,18 +2,21 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configure Tesla Supercharger",
-        "description": "Select a Supercharger location or enter a custom location slug. Data is fetched automatically from Tesla's API. Sensors will automatically update when prices change based on time-of-use schedules.",
+        "title": "Search Nearby Superchargers",
+        "description": "Enter coordinates to find the closest Tesla Superchargers. Default values use your Home Assistant location.",
         "data": {
-          "location_slug": "Supercharger Location"
-        },
-        "data_description": {
-          "location_slug": "Select from the list or manually type a custom slug name (e.g., 'vaterstettensupercharger', '426052')."
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "country": "Country Code (e.g. DE, US)",
+          "radius_amount": "Amount to find (max 10)"
         }
       },
-      "confirm": {
-        "title": "Confirm Custom Location",
-        "description": "Found Supercharger successfully: **{name}**\n\nDo you want to add this location to Home Assistant?"
+      "select": {
+        "title": "Select Supercharger",
+        "description": "Select one of the nearby Superchargers found.",
+        "data": {
+          "location_slug": "Available Superchargers"
+        }
       }
     },
     "error": {

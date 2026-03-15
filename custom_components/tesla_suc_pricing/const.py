@@ -7,9 +7,15 @@ DOMAIN = "tesla_suc_pricing"
 CONF_LOCATION_SLUG = "location_slug"
 CONF_LOCALE = "locale"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_LATITUDE = "latitude"
+CONF_LONGITUDE = "longitude"
+CONF_RADIUS_AMOUNT = "radius_amount"
+CONF_COUNTRY = "country"
 
 # Defaults
 DEFAULT_LOCALE = "de_DE"
+DEFAULT_COUNTRY = "DE"
+DEFAULT_RADIUS_AMOUNT = 5
 DEFAULT_SCAN_INTERVAL = timedelta(hours=1)
 MIN_SCAN_INTERVAL = timedelta(minutes=15)
 MAX_SCAN_INTERVAL = timedelta(hours=24)
@@ -38,6 +44,13 @@ DEFAULT_LOCATIONS = [
     "vaterstettensupercharger",
 ]
 
+
+# Storage / Cache
+STORAGE_KEY_LOCATIONS = f"{DOMAIN}_locations"
+STORAGE_KEY_DETAILS = f"{DOMAIN}_details"
+STORAGE_VERSION = 1
+CACHE_TTL_LOCATIONS = timedelta(days=14).total_seconds()
+CACHE_TTL_DETAILS = timedelta(days=1).total_seconds()
 
 # API
 API_BASE_URL = "https://www.tesla.com"
