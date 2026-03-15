@@ -35,14 +35,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     api = TeslaSuperchargerApi(hass)
 
     try:
-        # Test reading the location file
+        # Test reading the location file to ensure slug is valid/accessible
         result = await api.async_get_location_data(data[CONF_LOCATION_SLUG])
         
-        pricing_data = TeslaSuperchargerApi.extract_pricing_data(result)
+        location_slug = data[CONF_LOCATION_SLUG]
         
+        # Get the real display name dynamically
+        title = await api.async_get_location_name(location_slug)
+
         return {
-            "title": pricing_data["location_name"],
-            "location_slug": data[CONF_LOCATION_SLUG],
+            "title": title,
+            "location_slug": location_slug,
         }
     finally:
         # Always close the session after validation

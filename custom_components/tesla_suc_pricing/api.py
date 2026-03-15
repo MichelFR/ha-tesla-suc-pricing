@@ -178,6 +178,46 @@ class TeslaSuperchargerApi:
                 f"Unexpected error fetching {location_slug}: {err}"
             ) from err
 
+    async def async_get_location_name(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> str:
+        """Fetch the display name for a location slug dynamically."""
+        async with self._session_lock:
+            if not self._session:
+                headers = {
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+                }
+                ssl_context = ssl.create_default_context()
+                ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+                cookie_jar = aiohttp.CookieJar()
+                connector = aiohttp.TCPConnector(ssl=ssl_context)
+                self._session = aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar, connector=connector)
+
+        # Replace hyphens with underscores in locale to match user example (de_DE vs de-DE)
+        api_locale = locale.replace("-", "_")
+        url = f"https://www.tesla.com/api/findus/get-location-details?locationSlug={location_slug}&functionTypes=party&locale={api_locale}&isInHkMoTw=false"
+
+        try:
+            _LOGGER.debug("Fetching location details for name: %s", url)
+            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                marketing = data.get("data", {}).get("marketing", {})
+                if marketing and "display_name" in marketing:
+                    return marketing["display_name"]
+                
+                functions = data.get("data", {}).get("functions", [])
+                if functions and len(functions) > 0 and "customer_facing_name" in functions[0]:
+                    return functions[0]["customer_facing_name"]
+                
+                # Fallback to slug titleized
+                return location_slug.replace("-", " ").replace("supercharger", "").title().strip()
+                
+        except Exception as err:
+            _LOGGER.warning("Could not fetch explicit location name for %s: %s", location_slug, err)
+            return location_slug.replace("-", " ").replace("supercharger", "").title().strip()
+
     @staticmethod
     def extract_pricing_data(api_response: dict[str, Any]) -> dict[str, Any]:
         """Extract and organize pricing data from API response."""
