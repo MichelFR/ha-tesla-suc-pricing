@@ -20,6 +20,25 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 type TeslaSucPricingConfigEntry = ConfigEntry[TeslaSuperchargerCoordinator]
 
 
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the Tesla Supercharger Pricing integration."""
+    hass.data.setdefault(DOMAIN, {})
+
+    async def handle_refresh_cache(call):
+        """Handle the service call to clear the API cache."""
+        api_instance = hass.data[DOMAIN].get("api")
+        if api_instance:
+            await api_instance.async_clear_cache()
+            _LOGGER.info("Tesla Supercharger cache cleared via service call.")
+        else:
+            # No running instance - create a temporary API just to clear the store
+            temp_api = TeslaSuperchargerApi(hass)
+            await temp_api.async_clear_cache()
+            _LOGGER.info("Tesla Supercharger cache cleared (no active instance).")
+
+    hass.services.async_register(DOMAIN, "refresh_cache", handle_refresh_cache)
+    return True
+
 class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Tesla Supercharger pricing data."""
 
@@ -130,16 +149,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TeslaSucPricingConfigEnt
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    # Register cache refresh service
-    async def handle_refresh_cache(call):
-        """Handle the service call to clear the API cache."""
-        api_instance = hass.data[DOMAIN].get("api")
-        if api_instance:
-            await api_instance.async_clear_cache()
-            
-    if not hass.services.has_service(DOMAIN, "refresh_cache"):
-        hass.services.async_register(DOMAIN, "refresh_cache", handle_refresh_cache)
 
     return True
 
