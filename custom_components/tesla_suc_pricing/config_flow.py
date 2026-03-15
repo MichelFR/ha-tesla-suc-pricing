@@ -23,6 +23,7 @@ from .const import (
     CONF_LOCATION_SLUG,
     CONF_SCAN_INTERVAL,
     DEFAULT_LOCALE,
+    DEFAULT_LOCATIONS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SCAN_INTERVAL_OPTIONS,
@@ -69,10 +70,22 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         
-        # Get available locations from known_locations.json
+        # Load default locations from constants
         api = TeslaSuperchargerApi(self.hass)
-        available_locations = await api.async_get_available_locations()
-        _LOGGER.info("Found %d location(s): %s", len(available_locations), list(available_locations.keys()))
+        
+        # Initialize dictionary to store dynamically fetched names
+        if not hasattr(self, "_available_locations"):
+            self._available_locations = {}
+            for slug in DEFAULT_LOCATIONS:
+                try:
+                    name = await api.async_get_location_name(slug)
+                    self._available_locations[slug] = name
+                except Exception as e:
+                    _LOGGER.warning("Could not fetch name for %s: %s", slug, e)
+                    self._available_locations[slug] = slug
+                    
+        available_locations = self._available_locations
+        _LOGGER.info("Loaded %d location(s): %s", len(available_locations), list(available_locations.keys()))
 
         if user_input is not None:
             try:

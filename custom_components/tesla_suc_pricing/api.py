@@ -66,35 +66,6 @@ class TeslaSuperchargerApi:
                 _LOGGER.debug("TeslaSuperchargerApi session closed.")
             self._ref_count = 0
 
-    async def async_get_available_locations(self) -> dict[str, str]:
-        """Get list of known location slugs from known_locations.json file."""
-        known_locations_file = Path(__file__).parent / "known_locations.json"
-        
-        if not known_locations_file.exists():
-            _LOGGER.warning("Known locations file does not exist: %s", known_locations_file)
-            return {}
-        
-        try:
-            # Read the known locations JSON file
-            if self._hass:
-                # Use async file reading in Home Assistant context
-                def _read_json():
-                    with open(known_locations_file, encoding="utf-8") as f:
-                        return json.load(f)
-                
-                locations = await self._hass.async_add_executor_job(_read_json)
-            else:
-                # Sync reading for non-HA context
-                with open(known_locations_file, encoding="utf-8") as f:
-                    locations = json.load(f)
-            
-            _LOGGER.debug("Found %d known location slugs", len(locations))
-            return locations
-            
-        except Exception as err:
-            _LOGGER.error("Error reading known locations file: %s", err)
-            return {}
-
     async def async_get_location_data(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> dict[str, Any]:
         """Get location details from Tesla API."""
         async with self._session_lock:

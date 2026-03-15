@@ -26,6 +26,19 @@ SCAN_INTERVAL_OPTIONS = {
     "24h": 24,
 }
 
+# Known initial locations to provide in drop-down list
+DEFAULT_LOCATIONS = [
+    "29702",
+    "302331",
+    "400303",
+    "426052",
+    "BedburgSupercharger",
+    "Frechendesupercharger",
+    "erftstadtsupercharger",
+    "vaterstettensupercharger",
+]
+
+
 # API
 API_BASE_URL = "https://www.tesla.com"
 API_ENDPOINT = "/api/findus/get-location-details"
