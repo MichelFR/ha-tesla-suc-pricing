@@ -6,14 +6,14 @@
         "description": "Select a Supercharger location or enter a custom location slug. Data is fetched automatically from Tesla's API. Sensors will automatically update when prices change based on time-of-use schedules.",
         "data": {
           "location_slug": "Supercharger Location"
+        },
+        "data_description": {
+          "location_slug": "Select from the list or manually type a custom slug name (e.g., 'vaterstettensupercharger', '426052')."
         }
       },
-      "custom": {
-        "title": "Add Custom Location",
-        "description": "Enter the location slug from Tesla's website URL (e.g., 'vaterstettensupercharger'). The integration will automatically fetch pricing data from Tesla's API.",
-        "data": {
-          "location_slug": "Location Slug (from Tesla URL)"
-        }
+      "confirm": {
+        "title": "Confirm Custom Location",
+        "description": "Found Supercharger successfully: **{name}**\n\nDo you want to add this location to Home Assistant?"
       }
     },
     "error": {

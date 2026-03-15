@@ -57,6 +57,11 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        self._custom_slug: str | None = None
+        self._custom_name: str | None = None
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -73,13 +78,20 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 info = await validate_input(self.hass, user_input)
                 
                 # Set unique ID based on location slug
-                await self.async_set_unique_id(user_input[CONF_LOCATION_SLUG])
+                location_slug = user_input[CONF_LOCATION_SLUG]
+                await self.async_set_unique_id(location_slug)
                 self._abort_if_unique_id_configured()
+                
+                # If they manually typed it, present confirmation step
+                if location_slug not in available_locations:
+                    self._custom_slug = location_slug
+                    self._custom_name = info["title"]
+                    return await self.async_step_confirm()
                 
                 return self.async_create_entry(
                     title=info["title"],
                     data={
-                        CONF_LOCATION_SLUG: user_input[CONF_LOCATION_SLUG],
+                        CONF_LOCATION_SLUG: location_slug,
                         CONF_NAME: info["title"],
                     },
                 )
@@ -114,4 +126,23 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=data_schema,
             errors=errors,
         )
+
+    async def async_step_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm the custom location."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=self._custom_name,
+                data={
+                    CONF_LOCATION_SLUG: self._custom_slug,
+                    CONF_NAME: self._custom_name,
+                },
+            )
+
+        return self.async_show_form(
+            step_id="confirm",
+            description_placeholders={"name": self._custom_name},
+        )
+
 
