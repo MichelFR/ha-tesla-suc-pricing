@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2026-03-17
+
+### Fixed
+- Added `services.yaml` for the `tesla_suc_pricing.refresh_cache` service registered by the integration.
+- Declared the integration as config-entry-only with `CONFIG_SCHEMA` to satisfy Home Assistant validation for `async_setup`.
+- Updated the Hassfest workflow to `actions/checkout@v5` to avoid the Node.js 20 deprecation warning on GitHub Actions.
+
 ## [1.2.5] - 2026-03-17
 
 ### Fixed

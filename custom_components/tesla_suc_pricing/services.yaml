@@ -1,0 +1,3 @@
+refresh_cache:
+  name: Refresh cache
+  description: Clear the cached Tesla location and pricing data used by the integration.

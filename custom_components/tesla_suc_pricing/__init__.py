@@ -7,20 +7,23 @@ from datetime import datetime, timedelta
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import TeslaSuperchargerApi, TeslaSuperchargerApiError, TeslaSuperchargerApiAuthError
-from .const import CONF_LOCALE, CONF_LOCATION_SLUG, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .api import TeslaSuperchargerApi, TeslaSuperchargerApiError
+from .const import CONF_LOCATION_SLUG, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 type TeslaSucPricingConfigEntry = ConfigEntry[TeslaSuperchargerCoordinator]
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Tesla Supercharger Pricing integration."""
     hass.data.setdefault(DOMAIN, {})
 
