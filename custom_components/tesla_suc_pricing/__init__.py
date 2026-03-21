@@ -13,11 +13,18 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import TeslaLocationDataResult, TeslaSuperchargerApi, TeslaSuperchargerApiError
+from .api import (
+    TeslaLocationDataResult,
+    TeslaSuperchargerApi,
+    TeslaSuperchargerApiError,
+    TeslaSuperchargerApiRateLimitError,
+)
 from .const import CACHE_TTL_PRICING, CONF_LOCATION_SLUG, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 PRICING_UPDATE_INTERVAL = timedelta(seconds=CACHE_TTL_PRICING)
+RATE_LIMIT_BACKOFF_INITIAL = timedelta(minutes=15)
+RATE_LIMIT_BACKOFF_MAX = timedelta(hours=6)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -67,15 +74,34 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
         self._last_pricing_data = None
         self.last_successful_update: datetime | None = None
         self.raw_api_data: dict | None = None
+        self._rate_limit_backoff_attempts = 0
 
     def _set_update_interval_for_result(self, result: TeslaLocationDataResult) -> None:
         """Schedule the next refresh relative to the original Tesla fetch time."""
+        self._rate_limit_backoff_attempts = 0
+
         if result.source == "cache":
             remaining_seconds = max(1.0, CACHE_TTL_PRICING - max(0.0, time.time() - result.fetched_at))
             self.update_interval = timedelta(seconds=remaining_seconds)
             return
 
         self.update_interval = PRICING_UPDATE_INTERVAL
+
+    def _apply_rate_limit_backoff(self, err: TeslaSuperchargerApiRateLimitError) -> None:
+        """Increase retry delay after Tesla rate limiting."""
+        self._rate_limit_backoff_attempts += 1
+        backoff_seconds = min(
+            RATE_LIMIT_BACKOFF_MAX.total_seconds(),
+            RATE_LIMIT_BACKOFF_INITIAL.total_seconds() * (2 ** (self._rate_limit_backoff_attempts - 1)),
+        )
+        self.update_interval = timedelta(seconds=backoff_seconds)
+        _LOGGER.warning(
+            "Rate limited for %s; retrying in %s (attempt %d): %s",
+            self.location_slug,
+            self.update_interval,
+            self._rate_limit_backoff_attempts,
+            err,
+        )
 
     def _apply_location_result(self, result: TeslaLocationDataResult) -> dict[str, Any]:
         """Apply the API/cache result to coordinator state."""
@@ -106,6 +132,9 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
         """Fetch data from Tesla API."""
         try:
             return await self._async_fetch_pricing_data()
+        except TeslaSuperchargerApiRateLimitError as err:
+            self._apply_rate_limit_backoff(err)
+            raise UpdateFailed(f"Error reading location data: {err}") from err
         except TeslaSuperchargerApiError as err:
             raise UpdateFailed(f"Error reading location data: {err}") from err
 
@@ -115,6 +144,9 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
             async with self._debounced_refresh.async_lock():
                 new_data = await self._async_fetch_pricing_data(force_refresh=True)
                 self.async_set_updated_data(new_data)
+        except TeslaSuperchargerApiRateLimitError as err:
+            self._apply_rate_limit_backoff(err)
+            raise UpdateFailed(f"Error reading location data: {err}") from err
         except TeslaSuperchargerApiError as err:
             raise UpdateFailed(f"Error reading location data: {err}") from err
 
