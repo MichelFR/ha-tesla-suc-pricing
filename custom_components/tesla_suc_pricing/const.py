@@ -48,9 +48,11 @@ DEFAULT_LOCATIONS = [
 # Storage / Cache
 STORAGE_KEY_LOCATIONS = f"{DOMAIN}_locations_v2"
 STORAGE_KEY_DETAILS = f"{DOMAIN}_details_v2"
+STORAGE_KEY_PRICING = f"{DOMAIN}_pricing_v1"
 STORAGE_VERSION = 2
 CACHE_TTL_LOCATIONS = timedelta(days=14).total_seconds()
 CACHE_TTL_DETAILS = timedelta(days=1).total_seconds()
+CACHE_TTL_PRICING = timedelta(days=1).total_seconds()
 
 # API
 API_BASE_URL = "https://www.tesla.com"

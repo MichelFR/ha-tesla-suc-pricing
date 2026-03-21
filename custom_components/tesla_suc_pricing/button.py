@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
@@ -55,4 +54,4 @@ class TeslaSucRefreshButton(CoordinatorEntity[TeslaSuperchargerCoordinator], But
     async def async_press(self) -> None:
         """Handle the button press to refresh data."""
         _LOGGER.info("Manual refresh requested for %s", self.coordinator.location_slug)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_manual_refresh()

@@ -1,8 +1,10 @@
 """The Tesla Supercharger Pricing integration."""
 from __future__ import annotations
 
+import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -10,12 +12,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.util import dt as dt_util
 
-from .api import TeslaSuperchargerApi, TeslaSuperchargerApiError
-from .const import CONF_LOCATION_SLUG, DOMAIN
+from .api import TeslaLocationDataResult, TeslaSuperchargerApi, TeslaSuperchargerApiError
+from .const import CACHE_TTL_PRICING, CONF_LOCATION_SLUG, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
+PRICING_UPDATE_INTERVAL = timedelta(seconds=CACHE_TTL_PRICING)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -57,7 +59,7 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(hours=24),  # Refetch data every 24 hours
+            update_interval=PRICING_UPDATE_INTERVAL,
             config_entry=config_entry,
         )
         self.api = api
@@ -66,26 +68,53 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
         self.last_successful_update: datetime | None = None
         self.raw_api_data: dict | None = None
 
+    def _set_update_interval_for_result(self, result: TeslaLocationDataResult) -> None:
+        """Schedule the next refresh relative to the original Tesla fetch time."""
+        if result.source == "cache":
+            remaining_seconds = max(1.0, CACHE_TTL_PRICING - max(0.0, time.time() - result.fetched_at))
+            self.update_interval = timedelta(seconds=remaining_seconds)
+            return
+
+        self.update_interval = PRICING_UPDATE_INTERVAL
+
+    def _apply_location_result(self, result: TeslaLocationDataResult) -> dict[str, Any]:
+        """Apply the API/cache result to coordinator state."""
+        self._set_update_interval_for_result(result)
+        self.raw_api_data = result.data
+
+        new_data = TeslaSuperchargerApi.extract_pricing_data(result.data)
+
+        if self._last_pricing_data is not None:
+            if self._pricing_data_changed(self._last_pricing_data, new_data):
+                _LOGGER.info("Pricing data changed for %s, updating sensors", self.location_slug)
+            else:
+                _LOGGER.debug("No pricing changes detected for %s", self.location_slug)
+
+        self._last_pricing_data = new_data
+        self.last_successful_update = datetime.fromtimestamp(result.fetched_at, tz=timezone.utc)
+        return new_data
+
+    async def _async_fetch_pricing_data(self, *, force_refresh: bool = False) -> dict[str, Any]:
+        """Fetch and apply Tesla pricing data."""
+        result = await self.api.async_get_location_data(
+            self.location_slug,
+            force_refresh=force_refresh,
+        )
+        return self._apply_location_result(result)
+
     async def _async_update_data(self):
         """Fetch data from Tesla API."""
         try:
-            result = await self.api.async_get_location_data(self.location_slug)
-            
-            # Store raw API data for congestion sensor
-            self.raw_api_data = result
-            
-            new_data = TeslaSuperchargerApi.extract_pricing_data(result)
-            
-            # Check if pricing data has actually changed
-            if self._last_pricing_data is not None:
-                if self._pricing_data_changed(self._last_pricing_data, new_data):
-                    _LOGGER.info("Pricing data changed for %s, updating sensors", self.location_slug)
-                else:
-                    _LOGGER.debug("No pricing changes detected for %s", self.location_slug)
-            
-            self._last_pricing_data = new_data
-            self.last_successful_update = dt_util.now()
-            return new_data
+            return await self._async_fetch_pricing_data()
+        except TeslaSuperchargerApiError as err:
+            raise UpdateFailed(f"Error reading location data: {err}") from err
+
+    async def async_manual_refresh(self) -> None:
+        """Force a live Tesla API refresh and reset the 24-hour cache window."""
+        try:
+            async with self._debounced_refresh.async_lock():
+                new_data = await self._async_fetch_pricing_data(force_refresh=True)
+                self.async_set_updated_data(new_data)
         except TeslaSuperchargerApiError as err:
             raise UpdateFailed(f"Error reading location data: {err}") from err
 
