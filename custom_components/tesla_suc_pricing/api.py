@@ -33,6 +33,7 @@ LOCATIONS_URL = "https://www.tesla.com/api/findus/get-locations"
 DETAILS_URL = "https://www.tesla.com/api/findus/get-location-details"
 DEFAULT_LOCALE = "de-DE"
 FetchSource = Literal["api", "cache", "stale_cache"]
+MIN_LIVE_FETCH_SPACING_SECONDS = 15 * 60
 
 
 @dataclass(slots=True)
@@ -68,7 +69,10 @@ class TeslaSuperchargerApi:
         self._hass = hass
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
+        self._live_fetch_lock = asyncio.Lock()
         self._ref_count = 0
+        self._next_live_fetch_at = 0.0
+        self._rate_limited_until = 0.0
         
         self._store_locations: Store | None = None
         self._store_details: Store | None = None
@@ -348,77 +352,120 @@ class TeslaSuperchargerApi:
 
         url = f"{BASE_URL}?locationSlug={location_slug}&programType=supercharger&locale={locale}&isInHkMoTw=false"
 
-        try:
-            _LOGGER.debug("Fetching data from Tesla API: %s", url)
-            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                _LOGGER.debug("Tesla API response status: %s", response.status)
-                response.raise_for_status()
-                data = await response.json()
-                _LOGGER.debug("Tesla API response data keys: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+        async with self._live_fetch_lock:
+            scheduled_fetch_at = max(self._next_live_fetch_at, self._rate_limited_until)
+            delay_seconds = scheduled_fetch_at - time.time()
+            if delay_seconds > 0:
+                stale_result = self._get_cached_location_data(
+                    location_slug,
+                    cache_data,
+                    current_time,
+                    allow_stale=True,
+                )
+                if stale_result and stale_result.source == "stale_cache" and not force_refresh:
+                    _LOGGER.warning(
+                        "Postponing live fetch for %s by %.0f seconds due to shared throttle window; using stale cache",
+                        location_slug,
+                        delay_seconds,
+                    )
+                    return stale_result
 
-                data = self._validate_location_data(location_slug, data)
-                fetched_at = time.time()
+                _LOGGER.warning(
+                    "Postponing live fetch for %s by %.0f seconds due to shared throttle window",
+                    location_slug,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
 
-                cache_data[location_slug] = {
-                    "timestamp": fetched_at,
-                    "response": data,
-                }
-                if self._store_pricing:
-                    await self._store_pricing.async_save(cache_data)
+            try:
+                _LOGGER.debug("Fetching data from Tesla API: %s", url)
+                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    _LOGGER.debug("Tesla API response status: %s", response.status)
+                    response.raise_for_status()
+                    data = await response.json()
+                    _LOGGER.debug("Tesla API response data keys: %s", list(data.keys()) if isinstance(data, dict) else type(data))
 
-                _LOGGER.debug("Successfully fetched location data for %s", location_slug)
-                return TeslaLocationDataResult(data, "api", fetched_at)
+                    data = self._validate_location_data(location_slug, data)
+                    fetched_at = time.time()
 
-        except aiohttp.ClientResponseError as err:
-            stale_result = self._maybe_use_stale_cached_location_data(
-                location_slug,
-                cache_data,
-                current_time,
-                err,
-                force_refresh=force_refresh,
-            )
-            if stale_result:
-                return stale_result
+                    cache_data[location_slug] = {
+                        "timestamp": fetched_at,
+                        "response": data,
+                    }
+                    if self._store_pricing:
+                        await self._store_pricing.async_save(cache_data)
 
-            if err.status == 403:
-                raise TeslaSuperchargerApiAuthError(
-                    f"Access forbidden (403) for {location_slug}. Tesla may have bot protection active."
+                    self._next_live_fetch_at = max(
+                        self._next_live_fetch_at,
+                        fetched_at + MIN_LIVE_FETCH_SPACING_SECONDS,
+                    )
+                    _LOGGER.debug("Successfully fetched location data for %s", location_slug)
+                    return TeslaLocationDataResult(data, "api", fetched_at)
+
+            except aiohttp.ClientResponseError as err:
+                next_allowed = time.time() + MIN_LIVE_FETCH_SPACING_SECONDS
+                self._next_live_fetch_at = max(self._next_live_fetch_at, next_allowed)
+
+                if err.status == 429:
+                    self._rate_limited_until = max(self._rate_limited_until, next_allowed)
+
+                stale_result = self._maybe_use_stale_cached_location_data(
+                    location_slug,
+                    cache_data,
+                    current_time,
+                    err,
+                    force_refresh=force_refresh,
+                )
+                if stale_result:
+                    return stale_result
+
+                if err.status == 403:
+                    raise TeslaSuperchargerApiAuthError(
+                        f"Access forbidden (403) for {location_slug}. Tesla may have bot protection active."
+                    ) from err
+                if err.status == 429:
+                    raise TeslaSuperchargerApiRateLimitError(
+                        f"Rate limited (429) for {location_slug}. Too many requests from this IP."
+                    ) from err
+                raise TeslaSuperchargerApiConnectionError(
+                    f"HTTP error {err.status} fetching {location_slug}: {err.message}"
                 ) from err
-            if err.status == 429:
-                raise TeslaSuperchargerApiRateLimitError(
-                    f"Rate limited (429) for {location_slug}. Too many requests from this IP."
+            except aiohttp.ClientError as err:
+                self._next_live_fetch_at = max(
+                    self._next_live_fetch_at,
+                    time.time() + MIN_LIVE_FETCH_SPACING_SECONDS,
+                )
+                stale_result = self._maybe_use_stale_cached_location_data(
+                    location_slug,
+                    cache_data,
+                    current_time,
+                    err,
+                    force_refresh=force_refresh,
+                )
+                if stale_result:
+                    return stale_result
+
+                raise TeslaSuperchargerApiConnectionError(
+                    f"Connection error fetching {location_slug}: {err}"
                 ) from err
-            raise TeslaSuperchargerApiConnectionError(
-                f"HTTP error {err.status} fetching {location_slug}: {err.message}"
-            ) from err
-        except aiohttp.ClientError as err:
-            stale_result = self._maybe_use_stale_cached_location_data(
-                location_slug,
-                cache_data,
-                current_time,
-                err,
-                force_refresh=force_refresh,
-            )
-            if stale_result:
-                return stale_result
+            except Exception as err:
+                self._next_live_fetch_at = max(
+                    self._next_live_fetch_at,
+                    time.time() + MIN_LIVE_FETCH_SPACING_SECONDS,
+                )
+                stale_result = self._maybe_use_stale_cached_location_data(
+                    location_slug,
+                    cache_data,
+                    current_time,
+                    err,
+                    force_refresh=force_refresh,
+                )
+                if stale_result:
+                    return stale_result
 
-            raise TeslaSuperchargerApiConnectionError(
-                f"Connection error fetching {location_slug}: {err}"
-            ) from err
-        except Exception as err:
-            stale_result = self._maybe_use_stale_cached_location_data(
-                location_slug,
-                cache_data,
-                current_time,
-                err,
-                force_refresh=force_refresh,
-            )
-            if stale_result:
-                return stale_result
-
-            raise TeslaSuperchargerApiError(
-                f"Unexpected error fetching {location_slug}: {err}"
-            ) from err
+                raise TeslaSuperchargerApiError(
+                    f"Unexpected error fetching {location_slug}: {err}"
+                ) from err
 
     async def async_get_location_name(self, location_slug: str, locale: str = DEFAULT_LOCALE) -> str:
         """Fetch the display name for a location slug dynamically (with 1 day cache)."""
