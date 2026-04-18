@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.9] - 2026-04-18
+
+### Added
+- Added a `stale_cache_in_use` sensor so Home Assistant can show when stale cached pricing data is currently being used.
+
+### Fixed
+- Throttled live Tesla pricing fetches across locations so concurrent refreshes share a spacing window instead of piling into 429 bursts.
+
 ## [1.2.8] - 2026-03-21
 
 ### Fixed
