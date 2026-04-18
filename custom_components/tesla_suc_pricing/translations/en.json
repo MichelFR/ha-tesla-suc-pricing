@@ -8,7 +8,7 @@
           "latitude": "Latitude",
           "longitude": "Longitude",
           "country": "Country Code (e.g. DE, US)",
-          "radius_amount": "Amount to find (max 10)"
+          "radius_amount": "Amount to find (max 5)"
         }
       },
       "select": {

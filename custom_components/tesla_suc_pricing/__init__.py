@@ -23,9 +23,9 @@ from .const import CACHE_TTL_PRICING, CONF_LOCATION_SLUG, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 PRICING_UPDATE_INTERVAL = timedelta(seconds=CACHE_TTL_PRICING)
-RATE_LIMIT_BACKOFF_INITIAL = timedelta(minutes=15)
-RATE_LIMIT_BACKOFF_MAX = timedelta(hours=6)
-STALE_CACHE_RETRY_INTERVAL = timedelta(minutes=15)
+RATE_LIMIT_BACKOFF_INITIAL = timedelta(days=2)
+RATE_LIMIT_BACKOFF_MAX = timedelta(days=7)
+STALE_CACHE_RETRY_INTERVAL = PRICING_UPDATE_INTERVAL
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -80,19 +80,29 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
 
     def _set_update_interval_for_result(self, result: TeslaLocationDataResult) -> None:
         """Schedule the next refresh relative to the original Tesla fetch time."""
-        self._rate_limit_backoff_attempts = 0
-
         if result.source == "cache":
+            self._rate_limit_backoff_attempts = 0
             remaining_seconds = max(1.0, CACHE_TTL_PRICING - max(0.0, time.time() - result.fetched_at))
             self.update_interval = timedelta(seconds=remaining_seconds)
             return
         if result.source == "stale_cache":
+            if result.error_status == 429:
+                self._apply_rate_limit_backoff(reason="stale cache fallback after HTTP 429")
+                return
+
+            self._rate_limit_backoff_attempts = 0
             self.update_interval = STALE_CACHE_RETRY_INTERVAL
             return
 
+        self._rate_limit_backoff_attempts = 0
         self.update_interval = PRICING_UPDATE_INTERVAL
 
-    def _apply_rate_limit_backoff(self, err: TeslaSuperchargerApiRateLimitError) -> None:
+    def _apply_rate_limit_backoff(
+        self,
+        err: TeslaSuperchargerApiRateLimitError | None = None,
+        *,
+        reason: str | None = None,
+    ) -> None:
         """Increase retry delay after Tesla rate limiting."""
         self._rate_limit_backoff_attempts += 1
         backoff_seconds = min(
@@ -100,13 +110,22 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
             RATE_LIMIT_BACKOFF_INITIAL.total_seconds() * (2 ** (self._rate_limit_backoff_attempts - 1)),
         )
         self.update_interval = timedelta(seconds=backoff_seconds)
-        _LOGGER.warning(
-            "Rate limited for %s; retrying in %s (attempt %d): %s",
-            self.location_slug,
-            self.update_interval,
-            self._rate_limit_backoff_attempts,
-            err,
-        )
+        if err is not None:
+            _LOGGER.warning(
+                "Rate limited for %s; retrying in %s (attempt %d): %s",
+                self.location_slug,
+                self.update_interval,
+                self._rate_limit_backoff_attempts,
+                err,
+            )
+        else:
+            _LOGGER.warning(
+                "Rate limited for %s; retrying in %s (attempt %d)%s",
+                self.location_slug,
+                self.update_interval,
+                self._rate_limit_backoff_attempts,
+                f" after {reason}" if reason else "",
+            )
 
     def _apply_location_result(self, result: TeslaLocationDataResult) -> dict[str, Any]:
         """Apply the API/cache result to coordinator state."""

@@ -75,7 +75,7 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_LONGITUDE, default=default_lon): vol.Coerce(float),
                 vol.Required(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
                 vol.Required(CONF_RADIUS_AMOUNT, default=DEFAULT_RADIUS_AMOUNT): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=10)
+                    vol.Coerce(int), vol.Range(min=1, max=5)
                 ),
             }
         )
@@ -188,5 +188,4 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=data_schema,
             errors=errors,
         )
-
 

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.10] - 2026-04-18
+
+### Changed
+- Spaced out Tesla support lookups in the config flow so nearby Supercharger discovery does not burst requests back-to-back.
+- Limited config flow nearby Supercharger selection to at most 5 results.
+
+### Fixed
+- Removed the short retry backoff for ordinary pricing refresh failures so the next attempt waits for the normal 24-hour update window.
+- Switched Tesla `429 Too Many Requests` handling to day-sized exponential backoff, starting above 24 hours and increasing on repeated rate limits.
+
 ## [1.2.9] - 2026-04-18
 
 ### Added

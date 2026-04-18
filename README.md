@@ -31,7 +31,7 @@ Configuration now happens in two steps:
 1. **Search nearby Superchargers**
    - `Latitude` and `Longitude` are pre-filled from your Home Assistant location.
    - `Country` is an ISO country code (for example `US`, `DE`, `FR`).
-   - `Amount to find` controls how many nearby Superchargers are returned (max `10`).
+   - `Amount to find` controls how many nearby Superchargers are returned (max `5`).
 2. **Select Supercharger**
    - Choose one of the returned nearby Superchargers from the dropdown.
 

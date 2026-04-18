@@ -34,6 +34,7 @@ DETAILS_URL = "https://www.tesla.com/api/findus/get-location-details"
 DEFAULT_LOCALE = "de-DE"
 FetchSource = Literal["api", "cache", "stale_cache"]
 MIN_LIVE_FETCH_SPACING_SECONDS = 15 * 60
+MIN_SUPPORT_FETCH_SPACING_SECONDS = 1.5
 
 
 @dataclass(slots=True)
@@ -43,6 +44,7 @@ class TeslaLocationDataResult:
     data: dict[str, Any]
     source: FetchSource
     fetched_at: float
+    error_status: int | None = None
 
 
 class TeslaSuperchargerApiError(Exception):
@@ -70,9 +72,11 @@ class TeslaSuperchargerApi:
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
         self._live_fetch_lock = asyncio.Lock()
+        self._support_fetch_lock = asyncio.Lock()
         self._ref_count = 0
         self._next_live_fetch_at = 0.0
         self._rate_limited_until = 0.0
+        self._next_support_fetch_at = 0.0
         
         self._store_locations: Store | None = None
         self._store_details: Store | None = None
@@ -92,13 +96,26 @@ class TeslaSuperchargerApi:
         """Close the HTTP session when reference count reaches 0."""
         self._ref_count -= 1
         _LOGGER.debug("TeslaSuperchargerApi reference count decreased to %d", self._ref_count)
-        
+
         if self._ref_count <= 0:
             if self._session:
                 await self._session.close()
                 self._session = None
                 _LOGGER.debug("TeslaSuperchargerApi session closed.")
             self._ref_count = 0
+
+    async def _await_support_fetch_slot(self) -> None:
+        """Space out Tesla support requests so config flow does not burst them."""
+        async with self._support_fetch_lock:
+            delay_seconds = self._next_support_fetch_at - time.time()
+            if delay_seconds > 0:
+                _LOGGER.debug(
+                    "Delaying Tesla support request by %.1f seconds to avoid burst lookups",
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+
+            self._next_support_fetch_at = time.time() + MIN_SUPPORT_FETCH_SPACING_SECONDS
 
     async def _ensure_session(self) -> None:
         """Ensure the aiohttp session is initialized and valid."""
@@ -133,6 +150,11 @@ class TeslaSuperchargerApi:
                         await init_response.text()
                 except Exception as err:
                     _LOGGER.warning("Failed to initialize session from homepage: %s", err)
+                finally:
+                    self._next_support_fetch_at = max(
+                        self._next_support_fetch_at,
+                        time.time() + MIN_SUPPORT_FETCH_SPACING_SECONDS,
+                    )
 
     async def async_clear_cache(self) -> None:
         """Clear the cached Tesla API data."""
@@ -221,7 +243,13 @@ class TeslaSuperchargerApi:
                 location_slug,
                 err,
             )
-            return cached_result
+            error_status = err.status if isinstance(err, aiohttp.ClientResponseError) else None
+            return TeslaLocationDataResult(
+                cached_result.data,
+                cached_result.source,
+                cached_result.fetched_at,
+                error_status=error_status,
+            )
 
         return None
 
@@ -243,6 +271,7 @@ class TeslaSuperchargerApi:
         # Fetch if Cache miss
         if not locations:
             await self._ensure_session()
+            await self._await_support_fetch_slot()
             url = f"{LOCATIONS_URL}?country={country}&view=map"
             
             try:
@@ -481,6 +510,7 @@ class TeslaSuperchargerApi:
                 return cache_data[location_slug]["name"]
 
         await self._ensure_session()
+        await self._await_support_fetch_slot()
 
         # Replace hyphens with underscores in locale to match user example (de_DE vs de-DE)
         api_locale = locale.replace("-", "_")
