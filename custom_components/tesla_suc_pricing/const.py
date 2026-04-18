@@ -63,6 +63,7 @@ TESLA_FINDUS_URL = "https://www.tesla.com/findus"
 # Sensor types
 SENSOR_MEMBER_PRICE = "member_price"
 SENSOR_PUBLIC_PRICE = "public_price"
+SENSOR_STALE_CACHE_IN_USE = "stale_cache_in_use"
 
 # Vehicle types
 VEHICLE_TYPE_TESLA = "TSLA"

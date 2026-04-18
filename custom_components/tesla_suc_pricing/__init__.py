@@ -74,6 +74,7 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
         self._last_pricing_data = None
         self.last_successful_update: datetime | None = None
         self.raw_api_data: dict | None = None
+        self.using_stale_cache = False
         self._rate_limit_backoff_attempts = 0
 
     def _set_update_interval_for_result(self, result: TeslaLocationDataResult) -> None:
@@ -107,6 +108,7 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
         """Apply the API/cache result to coordinator state."""
         self._set_update_interval_for_result(result)
         self.raw_api_data = result.data
+        self.using_stale_cache = result.source == "stale_cache"
 
         new_data = TeslaSuperchargerApi.extract_pricing_data(result.data)
 
