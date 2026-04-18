@@ -25,7 +25,14 @@ A custom component for Home Assistant to retrieve pricing and congestion data fo
 
 ## Configuration
 Go to **Settings** -> **Devices & Services** -> **Add Integration** and search for **Tesla Supercharger Pricing**.
-You can select a known location from the dropdown, OR select **Custom Location** and type the Supercharger's slug found on its URL directly on [Tesla's Find Us Map](https://www.tesla.com/findus).
 
-Example configuration slug:
-`vaterstettensupercharger`
+Configuration now happens in two steps:
+
+1. **Search nearby Superchargers**
+   - `Latitude` and `Longitude` are pre-filled from your Home Assistant location.
+   - `Country` is an ISO country code (for example `US`, `DE`, `FR`).
+   - `Amount to find` controls how many nearby Superchargers are returned (max `10`).
+2. **Select Supercharger**
+   - Choose one of the returned nearby Superchargers from the dropdown.
+
+> Note: Manual slug entry is no longer part of the setup flow.
