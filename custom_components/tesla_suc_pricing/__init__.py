@@ -25,6 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 PRICING_UPDATE_INTERVAL = timedelta(seconds=CACHE_TTL_PRICING)
 RATE_LIMIT_BACKOFF_INITIAL = timedelta(minutes=15)
 RATE_LIMIT_BACKOFF_MAX = timedelta(hours=6)
+STALE_CACHE_RETRY_INTERVAL = timedelta(minutes=15)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -83,6 +84,9 @@ class TeslaSuperchargerCoordinator(DataUpdateCoordinator):
         if result.source == "cache":
             remaining_seconds = max(1.0, CACHE_TTL_PRICING - max(0.0, time.time() - result.fetched_at))
             self.update_interval = timedelta(seconds=remaining_seconds)
+            return
+        if result.source == "stale_cache":
+            self.update_interval = STALE_CACHE_RETRY_INTERVAL
             return
 
         self.update_interval = PRICING_UPDATE_INTERVAL
