@@ -136,13 +136,14 @@ class TeslaSuperchargerApi:
                     "Sec-Fetch-Site": "same-origin",
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
                 }
-                ssl_context = ssl.create_default_context()
-                ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-                ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
-                
+                ssl_context = await self._async_create_ssl_context()
                 cookie_jar = aiohttp.CookieJar()
                 connector = aiohttp.TCPConnector(ssl=ssl_context)
-                self._session = aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar, connector=connector)
+                self._session = aiohttp.ClientSession(
+                    headers=headers,
+                    cookie_jar=cookie_jar,
+                    connector=connector,
+                )
                 
                 _LOGGER.debug("Visiting Tesla homepage to establish session")
                 try:
@@ -155,6 +156,20 @@ class TeslaSuperchargerApi:
                         self._next_support_fetch_at,
                         time.time() + MIN_SUPPORT_FETCH_SPACING_SECONDS,
                     )
+
+    @staticmethod
+    def _create_ssl_context() -> ssl.SSLContext:
+        """Create TLS context for Tesla API requests."""
+        ssl_context = ssl.create_default_context()
+        ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
+        return ssl_context
+
+    async def _async_create_ssl_context(self) -> ssl.SSLContext:
+        """Create SSL context outside the event loop."""
+        if self._hass:
+            return await self._hass.async_add_executor_job(self._create_ssl_context)
+        return await asyncio.to_thread(self._create_ssl_context)
 
     async def async_clear_cache(self) -> None:
         """Clear the cached Tesla API data."""
