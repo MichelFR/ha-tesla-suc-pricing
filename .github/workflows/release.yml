@@ -29,66 +29,57 @@ jobs:
       - name: Check if tag exists
         id: tag_check
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+          if git rev-parse "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Get previous version
-        id: previous_version
-        if: steps.tag_check.outputs.exists == 'false'
-        run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
-            echo "tag=$PREV_TAG" >> $GITHUB_OUTPUT
-          else
-            echo "tag=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Generate changelog
+      - name: Extract changelog release notes
         id: changelog
         if: steps.tag_check.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [ -n "${{ steps.previous_version.outputs.tag }}" ]; then
-            CHANGELOG=$(git log --pretty=format:"- %s" ${{ steps.previous_version.outputs.tag }}..HEAD)
-          else
-            CHANGELOG=$(git log --pretty=format:"- %s")
-          fi
-          
-          # Create multiline output
-          {
-            echo "changes<<EOF"
-            echo "$CHANGELOG"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+
+          version = os.environ["VERSION"]
+          lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+
+          start = None
+          for index, line in enumerate(lines):
+              if line.startswith(f"## [{version}]"):
+                  start = index
+                  break
+
+          if start is None:
+              print(f"Could not find changelog section for version {version}", file=sys.stderr)
+              sys.exit(1)
+
+          end = len(lines)
+          for index in range(start + 1, len(lines)):
+              if lines[index].startswith("## ["):
+                  end = index
+                  break
+
+          section = "\n".join(lines[start:end]).strip()
+          if not section:
+              print(f"Changelog section for version {version} is empty", file=sys.stderr)
+              sys.exit(1)
+
+          Path("release-notes.md").write_text(section + "\n", encoding="utf-8")
+          PY
 
       - name: Create Release
         if: steps.tag_check.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.version }}
-          body: |
-            ## Changes in ${{ steps.version.outputs.version }}
-            
-            ${{ steps.changelog.outputs.changes }}
-            
-            ## Installation
-            
-            ### HACS (Recommended)
-            [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MichelFR&repository=michelfrha_tesla_suc_pricing&category=integration)
-            
-            - Add this repository as a custom repository in HACS
-            - Install or update the Tesla SuC Pricing integration
-            
-            ### Manual Installation
-            - Download the source code zip from the assets below
-            - Extract to `custom_components/tesla_suc_pricing/`
-            - Restart Home Assistant
-            
-            ## What's Changed
-            Full Changelog: https://github.com/MichelFR/michelfrha_tesla_suc_pricing/compare/${{ steps.previous_version.outputs.tag }}...${{ steps.version.outputs.tag }}
+          name: v${{ steps.version.outputs.version }}
+          body_path: release-notes.md
           draft: false
           prerelease: false
         env:
