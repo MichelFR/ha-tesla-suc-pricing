@@ -20,7 +20,12 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import TeslaSuperchargerCoordinator
-from .const import DOMAIN, SENSOR_MEMBER_PRICE, SENSOR_PUBLIC_PRICE
+from .const import (
+    DOMAIN,
+    SENSOR_MEMBER_PRICE,
+    SENSOR_PUBLIC_PRICE,
+    SENSOR_STALE_CACHE_IN_USE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,6 +43,7 @@ async def async_setup_entry(
         TeslaSucPricingSensor(coordinator, entry, SENSOR_PUBLIC_PRICE),
         TeslaSucLastUpdateSensor(coordinator, entry),
         TeslaSucCongestionSensor(coordinator, entry),
+        TeslaSucStaleCacheSensor(coordinator, entry),
     ]
 
     async_add_entities(entities)
@@ -610,3 +616,38 @@ class TeslaSucCongestionSensor(CoordinatorEntity, SensorEntity):
             }
         except (KeyError, TypeError, ValueError):
             return {}
+
+
+class TeslaSucStaleCacheSensor(CoordinatorEntity, SensorEntity):
+    """Sensor showing whether stale cached pricing data is currently in use."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:database-alert-outline"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["on", "off"]
+
+    def __init__(
+        self,
+        coordinator: TeslaSuperchargerCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        """Initialize the stale cache state sensor."""
+        super().__init__(coordinator)
+
+        self._attr_name = "Stale Cache in Use"
+        self._attr_unique_id = f"{entry.entry_id}_{SENSOR_STALE_CACHE_IN_USE}"
+        self._attr_translation_key = SENSOR_STALE_CACHE_IN_USE
+
+        location_name = coordinator.data.get("location_name", "Unknown Location")
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=f"Tesla Supercharger - {location_name}",
+            manufacturer="Tesla",
+            model="Supercharger",
+            configuration_url=f"https://www.tesla.com/findus/location/supercharger/{coordinator.location_slug}",
+        )
+
+    @property
+    def native_value(self) -> str:
+        """Return stale cache state as on/off."""
+        return "on" if self.coordinator.using_stale_cache else "off"

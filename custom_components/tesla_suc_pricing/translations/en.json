@@ -44,6 +44,9 @@
       },
       "congestion": {
         "name": "Congestion"
+      },
+      "stale_cache_in_use": {
+        "name": "Stale Cache in Use"
       }
     },
     "button": {
