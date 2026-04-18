@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Buscar Supercargadores cercanos",
+        "description": "Introduzca coordenadas para encontrar los Supercargadores Tesla más cercanos. Los valores predeterminados usan la ubicación de Home Assistant.",
+        "data": {
+          "latitude": "Latitud",
+          "longitude": "Longitud",
+          "country": "Código de país (p. ej. DE, US)",
+          "radius_amount": "Cantidad a encontrar (máx. 5)"
+        }
+      },
+      "select": {
+        "title": "Seleccionar Supercargador",
+        "description": "Seleccione uno de los Supercargadores cercanos encontrados.",
+        "data": {
+          "location_slug": "Supercargadores disponibles"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con la API de Tesla. Es posible que la API no esté disponible o no sea accesible.",
+      "invalid_location": "Identificador de ubicación no válido. La API de Tesla devolvió un error o no devolvió datos para esta ubicación.",
+      "rate_limit": "Demasiadas solicitudes (429). Tesla ha limitado temporalmente su IP. Inténtelo de nuevo más tarde.",
+      "invalid_json": "Se recibieron datos JSON no válidos de la API de Tesla.",
+      "no_locations": "No se encontraron ubicaciones válidas de Supercargadores.",
+      "unknown": "Se produjo un error inesperado. Consulte los registros."
+    },
+    "abort": {
+      "already_configured": "Esta ubicación de Supercargador ya está configurada."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "member_price": {
+        "name": "Precio para miembros"
+      },
+      "public_price": {
+        "name": "Precio de carga pública"
+      },
+      "last_update": {
+        "name": "Última actualización"
+      },
+      "congestion": {
+        "name": "Congestión"
+      },
+      "stale_cache_in_use": {
+        "name": "Caché obsoleta en uso"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Actualizar"
+      }
+    }
+  }
+}

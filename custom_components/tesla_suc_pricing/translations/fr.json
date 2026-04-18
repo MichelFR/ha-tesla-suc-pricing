@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Rechercher des Superchargeurs à proximité",
+        "description": "Saisissez des coordonnées pour trouver les Superchargeurs Tesla les plus proches. Les valeurs par défaut utilisent l'emplacement de Home Assistant.",
+        "data": {
+          "latitude": "Latitude",
+          "longitude": "Longitude",
+          "country": "Code pays (par ex. DE, US)",
+          "radius_amount": "Nombre de résultats (max. 5)"
+        }
+      },
+      "select": {
+        "title": "Sélectionner un Superchargeur",
+        "description": "Sélectionnez l'un des Superchargeurs proches trouvés.",
+        "data": {
+          "location_slug": "Superchargeurs disponibles"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Impossible de se connecter à l'API Tesla. L'API est peut-être indisponible ou injoignable.",
+      "invalid_location": "Identifiant d'emplacement invalide. L'API Tesla a renvoyé une erreur ou aucune donnée pour cet emplacement.",
+      "rate_limit": "Trop de requêtes (429). Tesla a temporairement limité votre IP. Veuillez réessayer plus tard.",
+      "invalid_json": "Données JSON invalides reçues de l'API Tesla.",
+      "no_locations": "Aucun emplacement de Superchargeur valide trouvé.",
+      "unknown": "Une erreur inattendue s'est produite. Veuillez consulter les journaux."
+    },
+    "abort": {
+      "already_configured": "Cet emplacement Superchargeur est déjà configuré."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "member_price": {
+        "name": "Tarif membre"
+      },
+      "public_price": {
+        "name": "Tarif de recharge public"
+      },
+      "last_update": {
+        "name": "Dernière mise à jour"
+      },
+      "congestion": {
+        "name": "Affluence"
+      },
+      "stale_cache_in_use": {
+        "name": "Cache obsolète utilisé"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Actualiser"
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Zoek Superchargers in de buurt",
+        "description": "Voer coördinaten in om de dichtstbijzijnde Tesla Superchargers te vinden. De standaardwaarden gebruiken je Home Assistant-locatie.",
+        "data": {
+          "latitude": "Breedtegraad",
+          "longitude": "Lengtegraad",
+          "country": "Landcode (bijv. DE, US)",
+          "radius_amount": "Aantal resultaten (max. 5)"
+        }
+      },
+      "select": {
+        "title": "Selecteer Supercharger",
+        "description": "Selecteer een van de gevonden Superchargers in de buurt.",
+        "data": {
+          "location_slug": "Beschikbare Superchargers"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Kan geen verbinding maken met de Tesla-API. De API is mogelijk niet beschikbaar of niet bereikbaar.",
+      "invalid_location": "Ongeldige locatie-slug. De Tesla-API gaf een fout of geen gegevens terug voor deze locatie.",
+      "rate_limit": "Te veel verzoeken (429). Tesla heeft je IP tijdelijk beperkt. Probeer het later opnieuw.",
+      "invalid_json": "Ongeldige JSON-gegevens ontvangen van de Tesla-API.",
+      "no_locations": "Geen geldige Supercharger-locaties gevonden.",
+      "unknown": "Er is een onverwachte fout opgetreden. Controleer de logs."
+    },
+    "abort": {
+      "already_configured": "Deze Supercharger-locatie is al geconfigureerd."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "member_price": {
+        "name": "Ledentarief"
+      },
+      "public_price": {
+        "name": "Prijs voor openbaar laden"
+      },
+      "last_update": {
+        "name": "Laatste update"
+      },
+      "congestion": {
+        "name": "Bezetting"
+      },
+      "stale_cache_in_use": {
+        "name": "Verouderde cache in gebruik"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Vernieuwen"
+      }
+    }
+  }
+}
