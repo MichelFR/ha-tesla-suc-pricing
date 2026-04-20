@@ -24,6 +24,7 @@ from .const import (
     CACHE_TTL_LOCATIONS,
     CACHE_TTL_DETAILS,
     CACHE_TTL_PRICING,
+    TESLA_FINDUS_URL,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -123,18 +124,7 @@ class TeslaSuperchargerApi:
             if not self._session:
                 headers = {
                     "Accept": "application/json, text/plain, */*",
-                    "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-                    "Cache-Control": "no-cache",
-                    "Pragma": "no-cache",
-                    "Priority": "u=1, i",
-                    "Referer": "https://www.tesla.com/de_de/findus",
-                    "Sec-CH-UA": '"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"',
-                    "Sec-CH-UA-Mobile": "?0",
-                    "Sec-CH-UA-Platform": '"macOS"',
-                    "Sec-Fetch-Dest": "empty",
-                    "Sec-Fetch-Mode": "cors",
-                    "Sec-Fetch-Site": "same-origin",
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+                    "User-Agent": "Home Assistant Tesla Supercharger Pricing",
                 }
                 ssl_context = await self._async_create_ssl_context()
                 cookie_jar = aiohttp.CookieJar()
@@ -145,9 +135,9 @@ class TeslaSuperchargerApi:
                     connector=connector,
                 )
                 
-                _LOGGER.debug("Visiting Tesla homepage to establish session")
+                _LOGGER.debug("Visiting Tesla findus page to establish session")
                 try:
-                    async with self._session.get("https://www.tesla.com/de_de/", timeout=aiohttp.ClientTimeout(total=30)) as init_response:
+                    async with self._session.get(TESLA_FINDUS_URL, timeout=aiohttp.ClientTimeout(total=30)) as init_response:
                         await init_response.text()
                 except Exception as err:
                     _LOGGER.warning("Failed to initialize session from homepage: %s", err)
@@ -157,12 +147,22 @@ class TeslaSuperchargerApi:
                         time.time() + MIN_SUPPORT_FETCH_SPACING_SECONDS,
                     )
 
+    async def _reset_browser_data(self) -> None:
+        """Drop the current session so Tesla cookies and related state are rebuilt."""
+        async with self._session_lock:
+            session = self._session
+            self._session = None
+            self._next_support_fetch_at = 0.0
+
+        if session:
+            await session.close()
+            _LOGGER.debug("Tesla browser data cleared and session closed after HTTP 403.")
+
     @staticmethod
     def _create_ssl_context() -> ssl.SSLContext:
         """Create TLS context for Tesla API requests."""
         ssl_context = ssl.create_default_context()
         ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-        ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
         return ssl_context
 
     async def _async_create_ssl_context(self) -> ssl.SSLContext:
@@ -268,6 +268,65 @@ class TeslaSuperchargerApi:
 
         return None
 
+    async def _retry_request_after_403(self, *, url: str, timeout: aiohttp.ClientTimeout) -> dict[str, Any]:
+        """Retry a Tesla JSON request once after clearing session state on HTTP 403."""
+        for attempt in range(2):
+            await self._ensure_session()
+            try:
+                async with self._session.get(url, timeout=timeout) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            except aiohttp.ClientResponseError as err:
+                if err.status == 403 and attempt == 0:
+                    _LOGGER.warning(
+                        "Tesla returned HTTP 403 for %s; clearing browser data and retrying once",
+                        url,
+                    )
+                    await self._reset_browser_data()
+                    continue
+                raise
+
+        raise TeslaSuperchargerApiAuthError(f"Access forbidden (403) for {url}")
+
+    @staticmethod
+    def _build_location_results(
+        locations: list[dict[str, Any]],
+        lat: float,
+        lon: float,
+        max_results: int,
+    ) -> list[dict[str, Any]]:
+        """Normalize Tesla location payloads into distance-sorted results."""
+        results = []
+        for loc in locations:
+            try:
+                # Root level latitude/longitude are preferred if they exist.
+                # Otherwise fall back to supercharger_function values.
+                loc_lat = loc.get("latitude")
+                loc_lon = loc.get("longitude")
+
+                if loc_lat is None or loc_lon is None:
+                    func = loc.get("supercharger_function", {})
+                    loc_lat = func.get("actual_latitude")
+                    loc_lon = func.get("actual_longitude")
+
+                if loc_lat is None or loc_lon is None:
+                    continue
+
+                dist_km = distance(lat, lon, float(loc_lat), float(loc_lon)) / 1000.0
+                results.append(
+                    {
+                        "location_url_slug": loc["location_url_slug"],
+                        "latitude": float(loc_lat),
+                        "longitude": float(loc_lon),
+                        "distance_km": dist_km,
+                    }
+                )
+            except (ValueError, TypeError, KeyError):
+                continue
+
+        results.sort(key=lambda x: x["distance_km"])
+        return results[:max_results]
+
     async def async_get_closest_superchargers(self, lat: float, lon: float, country: str, max_results: int = 5) -> list[dict[str, Any]]:
         """Fetch closest superchargers by coordinates, utilizing 14-day cache."""
         cache_data = {}
@@ -275,48 +334,86 @@ class TeslaSuperchargerApi:
             cache_data = await self._store_locations.async_load() or {}
             
         current_time = time.time()
-        locations = []
+        locations: list[dict[str, Any]] = []
+        cached_entry = cache_data.get(country)
+        cached_timestamp = None
+        cached_locations: list[dict[str, Any]] | None = None
+
+        if isinstance(cached_entry, dict):
+            cached_timestamp = cached_entry.get("timestamp")
+            raw_locations = cached_entry.get("locations")
+            if isinstance(raw_locations, list):
+                cached_locations = raw_locations
         
         # Check cache
-        if country in cache_data and "timestamp" in cache_data[country] and "locations" in cache_data[country]:
-            if current_time - cache_data[country]["timestamp"] < CACHE_TTL_LOCATIONS:
-                _LOGGER.debug("Using cached locations map for %s (%d entries)", country, len(cache_data[country]["locations"]))
-                locations = cache_data[country]["locations"]
+        if (
+            isinstance(cached_timestamp, (int, float))
+            and cached_locations is not None
+            and current_time - float(cached_timestamp) < CACHE_TTL_LOCATIONS
+        ):
+            _LOGGER.debug(
+                "Using cached locations map for %s (%d entries)",
+                country,
+                len(cached_locations),
+            )
+            return self._build_location_results(cached_locations, lat, lon, max_results)
         
         # Fetch if Cache miss
         if not locations:
             await self._ensure_session()
             await self._await_support_fetch_slot()
             url = f"{LOCATIONS_URL}?country={country}&view=map"
-            
+
             try:
                 _LOGGER.debug("Fetching locations map from API: %s", url)
-                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as response:
-                    response.raise_for_status()
-                    data = await response.json()
-                    
-                    raw_list = data.get("data", {}).get("data", [])
-                    _LOGGER.info("Tesla API returned %d total locations for country=%s", len(raw_list), country)
-                    
-                    # Extract superchargers: match by type OR presence of supercharger_function block
-                    for loc in raw_list:
-                        is_suc = "supercharger" in loc.get("location_type", [])
-                        has_func = "supercharger_function" in loc
-                        has_slug = "location_url_slug" in loc
+                data = await self._retry_request_after_403(
+                    url=url,
+                    timeout=aiohttp.ClientTimeout(total=45),
+                )
 
-                        if (is_suc or has_func) and has_slug:
-                            locations.append(loc)
-                    
-                    _LOGGER.info("Filtered to %d supercharger locations for country=%s", len(locations), country)
-                    
-                    # Save to cache (even if empty, so we don't hammer the API)
-                    cache_data[country] = {
-                        "timestamp": current_time,
-                        "locations": locations
-                    }
-                    if self._store_locations:
-                        await self._store_locations.async_save(cache_data)
+                raw_list = data.get("data", {}).get("data", [])
+                _LOGGER.info(
+                    "Tesla API returned %d total locations for country=%s",
+                    len(raw_list),
+                    country,
+                )
+
+                # Extract superchargers: match by type OR presence of supercharger_function block
+                for loc in raw_list:
+                    is_suc = "supercharger" in loc.get("location_type", [])
+                    has_func = "supercharger_function" in loc
+                    has_slug = "location_url_slug" in loc
+
+                    if (is_suc or has_func) and has_slug:
+                        locations.append(loc)
+
+                _LOGGER.info(
+                    "Filtered to %d supercharger locations for country=%s",
+                    len(locations),
+                    country,
+                )
+
+                # Save to cache (even if empty, so we don't hammer the API)
+                cache_data[country] = {
+                    "timestamp": current_time,
+                    "locations": locations,
+                }
+                if self._store_locations:
+                    await self._store_locations.async_save(cache_data)
             except aiohttp.ClientResponseError as err:
+                if cached_locations is not None:
+                    _LOGGER.warning(
+                        "Using stale cached locations for %s after live fetch failed: %s",
+                        country,
+                        err,
+                    )
+                    return self._build_location_results(
+                        cached_locations,
+                        lat,
+                        lon,
+                        max_results,
+                    )
+
                 if err.status == 403:
                     raise TeslaSuperchargerApiAuthError(
                         f"Access forbidden (403) for {country} locations. Tesla may have bot protection active."
@@ -329,44 +426,40 @@ class TeslaSuperchargerApi:
                     f"HTTP error {err.status} fetching {country} locations: {err.message}"
                 ) from err
             except aiohttp.ClientError as err:
+                if cached_locations is not None:
+                    _LOGGER.warning(
+                        "Using stale cached locations for %s after live fetch failed: %s",
+                        country,
+                        err,
+                    )
+                    return self._build_location_results(
+                        cached_locations,
+                        lat,
+                        lon,
+                        max_results,
+                    )
+
                 raise TeslaSuperchargerApiConnectionError(
                     f"Connection error fetching {country} locations: {err}"
                 ) from err
             except Exception as err:
+                if cached_locations is not None:
+                    _LOGGER.warning(
+                        "Using stale cached locations for %s after live fetch failed: %s",
+                        country,
+                        err,
+                    )
+                    return self._build_location_results(
+                        cached_locations,
+                        lat,
+                        lon,
+                        max_results,
+                    )
+
                 _LOGGER.error("Failed to fetch superchargers map: %s", err)
                 raise TeslaSuperchargerApiError(f"Failed to fetch locations for {country}") from err
-                
-        # Calculate distances on a separate list of simple dicts/copies to avoid mutating cache
-        results = []
-        for loc in locations:
-            try:
-                # Root level latitude/longitude are preferred if they exist
-                # Otherwise fallback to supercharger_function values
-                loc_lat = loc.get("latitude")
-                loc_lon = loc.get("longitude")
-                
-                if loc_lat is None or loc_lon is None:
-                    func = loc.get("supercharger_function", {})
-                    loc_lat = func.get("actual_latitude")
-                    loc_lon = func.get("actual_longitude")
-                
-                if loc_lat is None or loc_lon is None:
-                    continue
-                    
-                dist_km = distance(lat, lon, float(loc_lat), float(loc_lon)) / 1000.0
-                
-                results.append({
-                    "location_url_slug": loc["location_url_slug"],
-                    "latitude": float(loc_lat),
-                    "longitude": float(loc_lon),
-                    "distance_km": dist_km
-                })
-            except (ValueError, TypeError):
-                continue
-            
-        # Sort results by distance and return top X
-        results.sort(key=lambda x: x["distance_km"])
-        return results[:max_results]
+
+        return self._build_location_results(locations, lat, lon, max_results)
 
     async def async_get_location_data(
         self,
@@ -394,7 +487,8 @@ class TeslaSuperchargerApi:
 
         await self._ensure_session()
 
-        url = f"{BASE_URL}?locationSlug={location_slug}&programType=supercharger&locale={locale}&isInHkMoTw=false"
+        api_locale = locale.replace("_", "-")
+        url = f"{BASE_URL}?locationSlug={location_slug}&programType=supercharger&locale={api_locale}&isInHkMoTw=false"
 
         async with self._live_fetch_lock:
             scheduled_fetch_at = max(self._next_live_fetch_at, self._rate_limited_until)
@@ -423,28 +517,31 @@ class TeslaSuperchargerApi:
 
             try:
                 _LOGGER.debug("Fetching data from Tesla API: %s", url)
-                async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    _LOGGER.debug("Tesla API response status: %s", response.status)
-                    response.raise_for_status()
-                    data = await response.json()
-                    _LOGGER.debug("Tesla API response data keys: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+                data = await self._retry_request_after_403(
+                    url=url,
+                    timeout=aiohttp.ClientTimeout(total=30),
+                )
+                _LOGGER.debug(
+                    "Tesla API response data keys: %s",
+                    list(data.keys()) if isinstance(data, dict) else type(data),
+                )
 
-                    data = self._validate_location_data(location_slug, data)
-                    fetched_at = time.time()
+                data = self._validate_location_data(location_slug, data)
+                fetched_at = time.time()
 
-                    cache_data[location_slug] = {
-                        "timestamp": fetched_at,
-                        "response": data,
-                    }
-                    if self._store_pricing:
-                        await self._store_pricing.async_save(cache_data)
+                cache_data[location_slug] = {
+                    "timestamp": fetched_at,
+                    "response": data,
+                }
+                if self._store_pricing:
+                    await self._store_pricing.async_save(cache_data)
 
-                    self._next_live_fetch_at = max(
-                        self._next_live_fetch_at,
-                        fetched_at + MIN_LIVE_FETCH_SPACING_SECONDS,
-                    )
-                    _LOGGER.debug("Successfully fetched location data for %s", location_slug)
-                    return TeslaLocationDataResult(data, "api", fetched_at)
+                self._next_live_fetch_at = max(
+                    self._next_live_fetch_at,
+                    fetched_at + MIN_LIVE_FETCH_SPACING_SECONDS,
+                )
+                _LOGGER.debug("Successfully fetched location data for %s", location_slug)
+                return TeslaLocationDataResult(data, "api", fetched_at)
 
             except aiohttp.ClientResponseError as err:
                 next_allowed = time.time() + MIN_LIVE_FETCH_SPACING_SECONDS
@@ -519,10 +616,17 @@ class TeslaSuperchargerApi:
             
         current_time = time.time()
         
+        cached_entry = cache_data.get(location_slug)
+        cached_name: str | None = None
+
         # Check cache
-        if location_slug in cache_data and "timestamp" in cache_data[location_slug] and "name" in cache_data[location_slug]:
-            if current_time - cache_data[location_slug]["timestamp"] < CACHE_TTL_DETAILS:
-                return cache_data[location_slug]["name"]
+        if isinstance(cached_entry, dict):
+            cached_timestamp = cached_entry.get("timestamp")
+            cached_value = cached_entry.get("name")
+            if isinstance(cached_value, str):
+                cached_name = cached_value
+                if isinstance(cached_timestamp, (int, float)) and current_time - float(cached_timestamp) < CACHE_TTL_DETAILS:
+                    return cached_value
 
         await self._ensure_session()
         await self._await_support_fetch_slot()
@@ -535,20 +639,23 @@ class TeslaSuperchargerApi:
         
         try:
             _LOGGER.debug("Fetching location details for name: %s", url)
-            async with self._session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                response.raise_for_status()
-                data = await response.json()
+            data = await self._retry_request_after_403(
+                url=url,
+                timeout=aiohttp.ClientTimeout(total=30),
+            )
                 
-                marketing = data.get("data", {}).get("marketing", {})
-                if marketing and "display_name" in marketing:
-                    name = marketing["display_name"]
-                else:
-                    functions = data.get("data", {}).get("functions", [])
-                    if functions and len(functions) > 0 and "customer_facing_name" in functions[0]:
-                        name = functions[0]["customer_facing_name"]
+            marketing = data.get("data", {}).get("marketing", {})
+            if marketing and "display_name" in marketing:
+                name = marketing["display_name"]
+            else:
+                functions = data.get("data", {}).get("functions", [])
+                if functions and len(functions) > 0 and "customer_facing_name" in functions[0]:
+                    name = functions[0]["customer_facing_name"]
                 
         except Exception as err:
             _LOGGER.warning("Could not fetch explicit location name for %s: %s", location_slug, err)
+            if cached_name:
+                name = cached_name
             
         # Save to cache regardless of whether it was perfectly fetched or falling back to slug
         cache_data[location_slug] = {
