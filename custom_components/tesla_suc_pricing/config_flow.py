@@ -7,17 +7,10 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_NAME
+from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE, CONF_NAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 from homeassistant.helpers import selector
-import voluptuous as vol
-
-from homeassistant import config_entries
-from homeassistant.const import CONF_NAME, CONF_LATITUDE, CONF_LONGITUDE
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
-
 from .api import (
     TeslaSuperchargerApi,
     TeslaSuperchargerApiConnectionError,
@@ -111,6 +104,12 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_NAME: title,
                     },
                 )
+            except AbortFlow as err:
+                if err.reason == "already_configured":
+                    errors["base"] = "already_configured"
+                else:
+                    _LOGGER.exception("Config flow aborted in select step: %s", err.reason)
+                    errors["base"] = "unknown"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception in select step")
                 errors["base"] = "unknown"
