@@ -64,6 +64,16 @@ TESLA_FINDUS_URL = "https://www.tesla.com/findus"
 SENSOR_MEMBER_PRICE = "member_price"
 SENSOR_PUBLIC_PRICE = "public_price"
 
+# Binary sensor types
+BINARY_SENSOR_STALE_CACHE_IN_USE = "stale_cache_in_use"
+
+# Config flow lookup spacing
+CONFIG_FLOW_LOOKUP_DELAY = 0.5
+
+# Rate-limit backoff (seconds)
+RATE_LIMIT_BACKOFF_BASE = timedelta(hours=1).total_seconds()
+RATE_LIMIT_BACKOFF_MAX = timedelta(hours=24).total_seconds()
+
 # Vehicle types
 VEHICLE_TYPE_TESLA = "TSLA"
 VEHICLE_TYPE_NON_TESLA = "NTSLA"

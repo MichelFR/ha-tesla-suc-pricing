@@ -42,6 +42,7 @@ class TeslaLocationDataResult:
     data: dict[str, Any]
     source: FetchSource
     fetched_at: float
+    rate_limited: bool = False
 
 
 class TeslaSuperchargerApiError(Exception):
@@ -200,6 +201,7 @@ class TeslaSuperchargerApi:
         err: Exception,
         *,
         force_refresh: bool,
+        rate_limited: bool = False,
     ) -> TeslaLocationDataResult | None:
         """Return stale cached pricing data for automatic refresh failures."""
         if force_refresh:
@@ -217,6 +219,7 @@ class TeslaSuperchargerApi:
                 location_slug,
                 err,
             )
+            cached_result.rate_limited = rate_limited
             return cached_result
 
         return None
@@ -376,6 +379,7 @@ class TeslaSuperchargerApi:
                 current_time,
                 err,
                 force_refresh=force_refresh,
+                rate_limited=(err.status == 429),
             )
             if stale_result:
                 return stale_result

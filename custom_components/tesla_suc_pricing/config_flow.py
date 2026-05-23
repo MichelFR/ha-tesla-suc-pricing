@@ -1,6 +1,7 @@
 """Config flow for Tesla Supercharger Pricing integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -25,6 +26,7 @@ from .api import (
     TeslaSuperchargerApiRateLimitError,
 )
 from .const import (
+    CONFIG_FLOW_LOOKUP_DELAY,
     CONF_LOCALE,
     CONF_LOCATION_SLUG,
     CONF_SCAN_INTERVAL,
@@ -75,7 +77,7 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_LONGITUDE, default=default_lon): vol.Coerce(float),
                 vol.Required(CONF_COUNTRY, default=DEFAULT_COUNTRY): str,
                 vol.Required(CONF_RADIUS_AMOUNT, default=DEFAULT_RADIUS_AMOUNT): vol.All(
-                    vol.Coerce(int), vol.Range(min=1, max=10)
+                    vol.Coerce(int), vol.Range(min=1, max=5)
                 ),
             }
         )
@@ -125,14 +127,16 @@ class TeslaSucPricingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self.lat, self.lon, self.country, self.amount
                 )
                 
-                # 2. Fetch Marketing Names dynamically
+                # 2. Fetch Marketing Names dynamically (spaced out to avoid burst)
                 locations = []
-                for loc in closest:
+                for idx, loc in enumerate(closest):
                     slug = loc.get("location_url_slug")
                     if not slug:
                         continue
+                    if idx > 0:
+                        await asyncio.sleep(CONFIG_FLOW_LOOKUP_DELAY)
                     name = await api.async_get_location_name(slug)
-                    
+
                     dist_km = round(loc.get("distance_km", 0), 1)
                     locations.append({
                         "slug": slug,
