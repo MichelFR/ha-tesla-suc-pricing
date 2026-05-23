@@ -69,6 +69,7 @@ class TeslaSuperchargerApi:
         self._hass = hass
         self._session: aiohttp.ClientSession | None = None
         self._session_lock = asyncio.Lock()
+        self._ssl_context: ssl.SSLContext | None = None
         self._ref_count = 0
         
         self._store_locations: Store | None = None
@@ -97,6 +98,27 @@ class TeslaSuperchargerApi:
                 _LOGGER.debug("TeslaSuperchargerApi session closed.")
             self._ref_count = 0
 
+    @staticmethod
+    def _create_ssl_context() -> ssl.SSLContext:
+        """Create an SSL context pinned to TLS 1.2 (blocking; must run in executor)."""
+        ctx = ssl.create_default_context()
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        return ctx
+
+    async def _async_get_ssl_context(self) -> ssl.SSLContext:
+        """Return a cached SSL context, building it in an executor on first use."""
+        ctx = self._ssl_context
+        if ctx is None:
+            if self._hass is not None:
+                ctx = await self._hass.async_add_executor_job(self._create_ssl_context)
+            else:
+                ctx = await asyncio.get_running_loop().run_in_executor(
+                    None, self._create_ssl_context
+                )
+            self._ssl_context = ctx
+        return ctx
+
     async def _ensure_session(self) -> None:
         """Ensure the aiohttp session is initialized and valid."""
         async with self._session_lock:
@@ -116,10 +138,8 @@ class TeslaSuperchargerApi:
                     "Sec-Fetch-Site": "same-origin",
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
                 }
-                ssl_context = ssl.create_default_context()
-                ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-                ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
-                
+                ssl_context = await self._async_get_ssl_context()
+
                 cookie_jar = aiohttp.CookieJar()
                 connector = aiohttp.TCPConnector(ssl=ssl_context)
                 self._session = aiohttp.ClientSession(headers=headers, cookie_jar=cookie_jar, connector=connector)
