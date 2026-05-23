@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Supercharger in der Nähe suchen",
+        "description": "Geben Sie Koordinaten ein, um die nächstgelegenen Tesla Supercharger zu finden. Die Standardwerte verwenden den Standort Ihres Home Assistant.",
+        "data": {
+          "latitude": "Breitengrad",
+          "longitude": "Längengrad",
+          "country": "Ländercode (z. B. DE, US)",
+          "radius_amount": "Anzahl zu finden (max. 5)"
+        }
+      },
+      "select": {
+        "title": "Supercharger auswählen",
+        "description": "Wählen Sie einen der gefundenen Supercharger in der Nähe aus.",
+        "data": {
+          "location_slug": "Verfügbare Supercharger"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zur Tesla-API fehlgeschlagen. Die API ist möglicherweise nicht erreichbar.",
+      "invalid_location": "Ungültiger Standort-Slug. Die Tesla-API hat einen Fehler zurückgegeben oder es liegen keine Daten für diesen Standort vor.",
+      "rate_limit": "Zu viele Anfragen (429). Tesla hat Ihre IP-Adresse vorübergehend gedrosselt. Bitte versuchen Sie es später erneut.",
+      "invalid_json": "Ungültige JSON-Daten von der Tesla-API empfangen.",
+      "no_locations": "Keine gültigen Supercharger-Standorte gefunden.",
+      "unknown": "Unerwarteter Fehler. Bitte prüfen Sie die Protokolle."
+    },
+    "abort": {
+      "already_configured": "Dieser Supercharger-Standort ist bereits konfiguriert."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "member_price": {
+        "name": "Mitgliederpreis"
+      },
+      "public_price": {
+        "name": "Öffentlicher Ladepreis"
+      },
+      "last_update": {
+        "name": "Letzte Aktualisierung"
+      },
+      "congestion": {
+        "name": "Auslastung"
+      }
+    },
+    "binary_sensor": {
+      "stale_cache_in_use": {
+        "name": "Veralteter Cache wird verwendet"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Aktualisieren"
+      }
+    }
+  }
+}

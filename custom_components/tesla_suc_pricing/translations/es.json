@@ -1,0 +1,60 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Buscar Supercargadores cercanos",
+        "description": "Introduce las coordenadas para encontrar los Supercargadores Tesla más cercanos. Los valores predeterminados usan la ubicación de tu Home Assistant.",
+        "data": {
+          "latitude": "Latitud",
+          "longitude": "Longitud",
+          "country": "Código de país (p. ej., DE, US)",
+          "radius_amount": "Cantidad a buscar (máx. 5)"
+        }
+      },
+      "select": {
+        "title": "Seleccionar Supercargador",
+        "description": "Selecciona uno de los Supercargadores cercanos encontrados.",
+        "data": {
+          "location_slug": "Supercargadores disponibles"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con la API de Tesla. Es posible que la API esté caída o no sea accesible.",
+      "invalid_location": "Identificador de ubicación inválido. La API de Tesla devolvió un error o no hay datos para esta ubicación.",
+      "rate_limit": "Demasiadas solicitudes (429). Tesla ha limitado temporalmente tu IP. Inténtalo de nuevo más tarde.",
+      "invalid_json": "Se recibieron datos JSON inválidos de la API de Tesla.",
+      "no_locations": "No se encontraron ubicaciones válidas de Supercargadores.",
+      "unknown": "Ocurrió un error inesperado. Por favor, revisa los registros."
+    },
+    "abort": {
+      "already_configured": "Esta ubicación de Supercargador ya está configurada."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "member_price": {
+        "name": "Precio para miembros"
+      },
+      "public_price": {
+        "name": "Precio de carga pública"
+      },
+      "last_update": {
+        "name": "Última actualización"
+      },
+      "congestion": {
+        "name": "Congestión"
+      }
+    },
+    "binary_sensor": {
+      "stale_cache_in_use": {
+        "name": "Usando caché obsoleta"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Actualizar"
+      }
+    }
+  }
+}
